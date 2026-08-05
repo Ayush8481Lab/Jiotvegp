@@ -16,36 +16,54 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "Missing 'url' query parameter." });
     }
 
+    // Generate a random Jio Residential IP (Range: 49.37.x.x) to trick the WAF
+    const fakeJioIp = `49.37.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+
     try {
         const targetUrl = decodeURIComponent(url);
 
-        // 2. Fetch with Android App Spoofing
+        // 2. Fetch with Mobile Network & App Spoofing
         const response = await fetch(targetUrl, {
             headers: {
-                // Mimic the JioTV Android Application
-                'User-Agent': 'JioTV/7.1.3 (Linux;Android 12) ExoPlayer/2.14.2',
-                // Standard Android network client
-                'X-Requested-With': 'com.jio.jioplay.tv',
+                // 1. Exact JioTV Mobile User-Agent
+                'User-Agent': 'plaYtv/7.0.8 (Linux;Android 11) ExoPlayerLib/2.11.8',
+                
+                // 2. Android Internal Package ID
+                'x-requested-with': 'com.jio.jioplay.tv',
+                
+                // 3. Jio specific API headers
+                'os': 'android',
+                'devicetype': 'phone',
+                'appkey': 'JioTV',
+                'channelid': '0',
+                'crmac': '00:00:00:00:00:00',
+                
+                // 4. Standard mobile accept headers
                 'Accept': 'application/json, text/plain, */*',
                 'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'Keep-Alive',
-                // Add device OS type for API validation
-                'os': 'android'
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                
+                // 5. IP Spoofing (Tricks the CDN into seeing a residential Jio IP instead of Vercel's AWS IP)
+                'X-Forwarded-For': fakeJioIp,
+                'X-Real-IP': fakeJioIp,
+                'Client-IP': fakeJioIp
             }
         });
 
         if (!response.ok) {
             return res.status(response.status).json({ 
-                error: "Failed to fetch target URL.", 
+                error: "Failed to fetch target URL. Jio WAF Blocked the request.", 
                 statusText: response.statusText,
-                statusCode: response.status
+                statusCode: response.status,
+                spoofedIpUsed: fakeJioIp
             });
         }
 
         const textData = await response.text();
 
         try {
-            // Try to parse as JSON
+            // Parse as JSON
             const jsonData = JSON.parse(textData);
             return res.status(200).json(jsonData);
         } catch (parseError) {

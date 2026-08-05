@@ -1,4 +1,3 @@
-// api/generate.js
 export default async function handler(req, res) {
     const { chunk = 1, start = 0, limit = 100 } = req.query;
 

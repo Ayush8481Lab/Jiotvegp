@@ -18,23 +18,19 @@ export default async function handler(req, res) {
 
     try {
         const targetUrl = decodeURIComponent(url);
-        
-        // Extract the base domain to use as fake Origin and Referer
-        const urlObj = new URL(targetUrl);
-        const baseOrigin = urlObj.origin;
 
-        // 2. Fetch with Advanced Browser Spoofing
+        // 2. Fetch with Android App Spoofing
         const response = await fetch(targetUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                // Mimic the JioTV Android Application
+                'User-Agent': 'JioTV/7.1.3 (Linux;Android 12) ExoPlayer/2.14.2',
+                // Standard Android network client
+                'X-Requested-With': 'com.jio.jioplay.tv',
                 'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-                'Referer': baseOrigin + '/',
-                'Origin': baseOrigin,
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'cross-site'
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'Keep-Alive',
+                // Add device OS type for API validation
+                'os': 'android'
             }
         });
 
@@ -49,9 +45,11 @@ export default async function handler(req, res) {
         const textData = await response.text();
 
         try {
+            // Try to parse as JSON
             const jsonData = JSON.parse(textData);
             return res.status(200).json(jsonData);
         } catch (parseError) {
+            // Fallback for raw text
             return res.status(200).json({ success: true, data: textData });
         }
 

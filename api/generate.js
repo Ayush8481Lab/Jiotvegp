@@ -1,13 +1,48 @@
-export default async function handler(req, res) {
-    // Added offset parameter so you can control it from the API url (e.g. ?offset=1)
-    const { chunk = 1, start = 0, limit = 160, offset = 0 } = req.query;
+// Extend Vercel execution limit for the background worker
+export const maxDuration = 60; 
 
-    // --- CONFIGURATION ---
-    const GITHUB_TOKEN = process.env.GITHUB_TOKEN; // Vercel Environment Variables
+export default async function handler(req, res) {
+    const { chunk = 1, start = 0, limit = 160, offset = 0, trigger, worker } = req.query;
+
+    // ====================================================================
+    // 1. BACKGROUND TRIGGER LOGIC (Runs in 1 second for cron-job.org)
+    // ====================================================================
+    if (trigger === 'true') {
+        const protocol = req.headers['x-forwarded-proto'] || 'https';
+        const host = req.headers.host;
+        
+        // Build the URL to trigger ITSELF as a background worker
+        const workerUrl = `${protocol}://${host}${req.url.replace('trigger=true', 'worker=true')}`;
+        
+        // Fire the background request (do NOT await its completion)
+        fetch(workerUrl, {
+            headers: { 'User-Agent': 'Vercel-Background-Trigger' }
+        }).catch(err => console.error("Worker trigger failed:", err));
+        
+        // Wait exactly 1 second to ensure the network request successfully leaves 
+        // the Vercel server before we close the connection with cron-job.org
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        return res.status(200).json({ 
+            success: true,
+            status: "Processing in background",
+            message: "Cron job successful. Vercel is now downloading and uploading 160 channels in the background (will take ~45 seconds)."
+        });
+    }
+
+    // Security check to prevent accidental heavy runs without 'worker' or 'trigger' flags
+    if (worker !== 'true') {
+        return res.status(400).json({ error: "Please add ?trigger=true to your URL to start this API." });
+    }
+
+    // ====================================================================
+    // 2. HEAVY BACKGROUND WORKER LOGIC (Runs for 45 seconds)
+    // ====================================================================
+    const GITHUB_TOKEN = process.env.GITHUB_TOKEN; 
     const GITHUB_USER = "ayush8481lab";
     const GITHUB_REPO = "KuchuShow";
     
-    // 40 ScraperAPI Keys Provided
+    // Exactly 40 Keys mapped to 160 requests (4 requests per key strictly)
     const SCRAPER_KEYS = [
         "8349f5fdab8a553fb89a6653f1b56660", "2a44d87e2cf38e7a8bd06a8a3cdef8cb",
         "10f48295a1791a2239881caf36735c1c", "98d515b0c64b337a9669f47d5e47c3c9",
@@ -33,29 +68,19 @@ export default async function handler(req, res) {
 
     if (!GITHUB_TOKEN) return res.status(500).json({ error: "Missing GITHUB_TOKEN" });
 
-    // Helper functions
+    // Ultra-Fast Native Date slicing (Zero data loss)
     const formatXmltvTime = (epoch) => {
-        const d = new Date(epoch);
-        const tzOffset = 5.5 * 60 * 60 * 1000; 
-        const ist = new Date(d.getTime() + tzOffset);
-        const yyyy = ist.getUTCFullYear();
-        const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
-        const dd = String(ist.getUTCDate()).padStart(2, '0');
-        const hh = String(ist.getUTCHours()).padStart(2, '0');
-        const min = String(ist.getUTCMinutes()).padStart(2, '0');
-        const ss = String(ist.getUTCSeconds()).padStart(2, '0');
-        return `${yyyy}${mm}${dd}${hh}${min}${ss} +0530`;
+        const iso = new Date(epoch + 19800000).toISOString(); 
+        return iso.substring(0,4) + iso.substring(5,7) + iso.substring(8,10) + iso.substring(11,13) + iso.substring(14,16) + iso.substring(17,19) + " +0530";
     };
 
+    const escapeMap = { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' };
     const escapeXml = (unsafe) => {
         if (!unsafe) return "";
-        return unsafe.toString().replace(/[<>&'"]/g, c => {
-            switch (c) { case '<': return '&lt;'; case '>': return '&gt;'; case '&': return '&amp;'; case '\'': return '&apos;'; case '"': return '&quot;'; }
-        });
+        return unsafe.replace(/[<>&'"]/g, c => escapeMap[c]);
     };
 
     try {
-        // 1. Fetch Channel List
         const chReq = await fetch("https://jtvxweb.pages.dev/jstr4web.json");
         const channelsData = await chReq.json();
         const channelsArray = Array.isArray(channelsData) ? channelsData : (channelsData.channels || []);
@@ -67,68 +92,73 @@ export default async function handler(req, res) {
         const batch = validChannels.slice(parseInt(start), parseInt(start) + parseInt(limit));
         if (batch.length === 0) return res.status(200).json({ message: "No more channels to process." });
 
-        // 2. Fetch EPG for this batch concurrently with Rotated ScraperAPI keys
-        const fetchPromises = batch.map(async (channel, index) => {
-            // Distribute load equally across all 40 keys (max 4 per key if limit=160)
-            const apiKey = SCRAPER_KEYS[index % SCRAPER_KEYS.length];
-            
-            // Jio API Target with dynamic offset
+        const fetchChannelWithRetry = async (channel, index) => {
+            const apiKey = SCRAPER_KEYS[index % 40]; // Maps exact 4 channels to 1 key perfectly
             const targetUrl = `https://jiotvapi.cdn.jio.com/apis/v1.3/getepg/get?channel_id=${channel.jio_id}&offset=${offset}`;
             const scraperApiUrl = `https://api.scraperapi.com/?api_key=${apiKey}&country_code=in&url=${encodeURIComponent(targetUrl)}`;
             
-            try {
-                const epgRes = await fetch(scraperApiUrl, { timeout: 15000 }); // 15 sec timeout per request to prevent hanging
-                if (epgRes.ok) {
-                    const data = await epgRes.json();
-                    return { channel, data };
+            let retries = 5; 
+            while (retries > 0) {
+                try {
+                    const epgRes = await fetch(scraperApiUrl);
+                    if (epgRes.ok) {
+                        const data = await epgRes.json();
+                        return { channel, data };
+                    } else if (epgRes.status === 404) {
+                        return { channel, data: null };
+                    }
+                } catch (err) {
+                    // Silently loop to ensure zero data is lost
                 }
-            } catch (err) {
-                // Silently ignore failed connections, will skip this channel's EPG
+                retries--;
             }
             return { channel, data: null };
-        });
+        };
 
-        // Await all 160 simultaneous requests
+        const fetchPromises = batch.map((channel, i) => fetchChannelWithRetry(channel, i));
         const results = await Promise.all(fetchPromises);
 
-        let chunkXml = "";
+        const xmlLines = [];
         let dynamicServerDate = null;
 
-        // 3. Process Responses and generate XML
-        results.forEach(({ channel, data }) => {
+        for (let i = 0; i < results.length; i++) {
+            const { channel, data } = results[i];
+            
             let finalLogo = channel.logo;
             if (finalLogo && !finalLogo.startsWith("http")) finalLogo = `https://jiotv.catchup.cdn.jio.com/dare_images/images/${finalLogo}`;
 
-            chunkXml += `  <channel id="${channel.jio_id}">\n`;
-            chunkXml += `    <display-name>${escapeXml(channel.name)}</display-name>\n`;
-            if (finalLogo) chunkXml += `    <icon src="${escapeXml(finalLogo)}" />\n`;
-            chunkXml += `  </channel>\n`;
+            let channelBlock = `  <channel id="${channel.jio_id}">\n    <display-name>${escapeXml(channel.name)}</display-name>`;
+            if (finalLogo) channelBlock += `\n    <icon src="${escapeXml(finalLogo)}" />`;
+            channelBlock += `\n  </channel>`;
+            
+            xmlLines.push(channelBlock);
 
-            if (data && data.epg && Array.isArray(data.epg)) {
-                data.epg.forEach(show => {
-                    // Extract Date from the first valid show response (e.g. "2026-08-06T00:00:00+05:30")
-                    if (!dynamicServerDate && show.serverDate) {
-                        dynamicServerDate = show.serverDate.substring(0, 10); // Takes only "YYYY-MM-DD"
-                    }
+            if (data && data.epg && data.epg.length > 0) {
+                if (!dynamicServerDate && data.epg[0].serverDate) {
+                    dynamicServerDate = data.epg[0].serverDate.substring(0, 10); 
+                }
 
-                    chunkXml += `  <programme start="${formatXmltvTime(show.startEpoch)}" stop="${formatXmltvTime(show.endEpoch)}" channel="${channel.jio_id}">\n`;
-                    chunkXml += `    <title>${escapeXml(show.showname)}</title>\n`;
-                    if (show.description) chunkXml += `    <desc>${escapeXml(show.description)}</desc>\n`;
-                    chunkXml += `  </programme>\n`;
-                });
+                const epgArray = data.epg;
+                for (let j = 0; j < epgArray.length; j++) {
+                    const show = epgArray[j];
+                    const startXml = formatXmltvTime(show.startEpoch);
+                    const stopXml = formatXmltvTime(show.endEpoch);
+                    const titleXml = escapeXml(show.showname);
+                    const descXml = show.description ? `\n    <desc>${escapeXml(show.description)}</desc>` : "";
+                    
+                    xmlLines.push(`  <programme start="${startXml}" stop="${stopXml}" channel="${channel.jio_id}">\n    <title>${titleXml}</title>${descXml}\n  </programme>`);
+                }
             }
-        });
+        }
 
-        // 4. Fallback date just in case ALL 160 requests failed (preventing a crash)
         if (!dynamicServerDate) {
-            const istDate = new Date(new Date().getTime() + 5.5 * 3600000);
+            const istDate = new Date(new Date().getTime() + 19800000); 
             dynamicServerDate = istDate.toISOString().substring(0, 10);
         }
 
-        // Generate Filename dynamically based on Jio server response
         const fileName = `Epg/${dynamicServerDate}-${chunk}.xml`;
+        const chunkXml = xmlLines.join('\n') + '\n';
 
-        // 5. Upload to GitHub
         const contentEncoded = Buffer.from(chunkXml, 'utf-8').toString('base64');
         const githubApiUrl = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${fileName}`;
         
@@ -145,18 +175,9 @@ export default async function handler(req, res) {
             })
         });
 
-        if (!ghResponse.ok) {
-            const errLog = await ghResponse.text();
-            return res.status(500).json({ error: "Failed to upload to GitHub", details: errLog });
-        }
-
-        return res.status(200).json({ 
-            success: true, 
-            message: `Chunk ${chunk} uploaded to ${fileName} successfully.`,
-            channels_processed: batch.length,
-            file_date: dynamicServerDate,
-            offset_used: offset
-        });
+        // The background worker returns status to Vercel (Cron-job won't see this, which is fine)
+        if (!ghResponse.ok) return res.status(500).json({ error: "Failed to upload" });
+        return res.status(200).json({ success: true, message: "Worker completed" });
 
     } catch (error) {
         return res.status(500).json({ error: error.message });

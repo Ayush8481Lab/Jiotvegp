@@ -5,44 +5,47 @@ export default async function handler(req, res) {
     const { chunk = 1, start = 0, limit = 160, offset = 0, trigger, worker } = req.query;
 
     // ====================================================================
-    // 1. BACKGROUND TRIGGER LOGIC (Runs in 1 second for cron-job.org)
+    // 1. BACKGROUND TRIGGER (Instantly replies in 2 seconds)
     // ====================================================================
     if (trigger === 'true') {
         const protocol = req.headers['x-forwarded-proto'] || 'https';
         const host = req.headers.host;
         
-        // Build the URL to trigger ITSELF as a background worker
+        // Build the worker URL
         const workerUrl = `${protocol}://${host}${req.url.replace('trigger=true', 'worker=true')}`;
         
-        // Fire the background request (do NOT await its completion)
-        fetch(workerUrl, {
-            headers: { 'User-Agent': 'Vercel-Background-Trigger' }
-        }).catch(err => console.error("Worker trigger failed:", err));
-        
-        // Wait exactly 1 second to ensure the network request successfully leaves 
-        // the Vercel server before we close the connection with cron-job.org
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // We ping the worker, but we intentionally ABORT the connection after 2 seconds.
+        // This forces Vercel to reply to cron-job.org instantly, freeing the connection,
+        // while the background worker continues running undisturbed!
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 2000);
+
+        try {
+            await fetch(workerUrl, { signal: controller.signal });
+        } catch (error) {
+            // It is completely normal and expected to catch an AbortError here after 2s.
+        }
         
         return res.status(200).json({ 
             success: true,
             status: "Processing in background",
-            message: "Cron job successful. Vercel is now downloading and uploading 160 channels in the background (will take ~45 seconds)."
+            message: "Cron job successful. Vercel is downloading and uploading 160 channels in the background."
         });
     }
 
-    // Security check to prevent accidental heavy runs without 'worker' or 'trigger' flags
+    // Prevent accidental direct hits without the correct flags
     if (worker !== 'true') {
-        return res.status(400).json({ error: "Please add ?trigger=true to your URL to start this API." });
+        return res.status(400).json({ error: "Please add ?trigger=true to your URL to start." });
     }
 
     // ====================================================================
-    // 2. HEAVY BACKGROUND WORKER LOGIC (Runs for 45 seconds)
+    // 2. HEAVY BACKGROUND WORKER LOGIC (Runs for 45-60 seconds)
     // ====================================================================
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN; 
     const GITHUB_USER = "ayush8481lab";
     const GITHUB_REPO = "KuchuShow";
     
-    // Exactly 40 Keys mapped to 160 requests (4 requests per key strictly)
+    // Exactly 40 Keys
     const SCRAPER_KEYS = [
         "8349f5fdab8a553fb89a6653f1b56660", "2a44d87e2cf38e7a8bd06a8a3cdef8cb",
         "10f48295a1791a2239881caf36735c1c", "98d515b0c64b337a9669f47d5e47c3c9",

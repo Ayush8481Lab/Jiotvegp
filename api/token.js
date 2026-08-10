@@ -1,11 +1,12 @@
-// We summon the serverless function to the Mumbai region
-// to bypass the geo-restrictions of the distant west.
+import https from 'https';
+
+// We remain in the Eastern realm to avoid the gaze of geo-blockers
 export const config = {
   regions: ['bom1'],
 };
 
 export default async function handler(req, res) {
-  // We open the gates for CORS
+  // Opening the gates
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
@@ -14,57 +15,88 @@ export default async function handler(req, res) {
   }
 
   try {
-    const targetUrl = 'https://www.zee5.com/live-tv/zee-news/0-9-zeenews';
-    
-    // We craft a thicker disguise to fool the sentinels
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1'
-      }
+    // We bind the fetching logic to a Promise, diving into raw streams
+    const token = await new Promise((resolve, reject) => {
+      
+      // The Dark Alchemy: Forging the request options
+      const options = {
+        hostname: 'www.zee5.com',
+        port: 443,
+        path: '/live-tv/zee-news/0-9-zeenews',
+        method: 'GET',
+        
+        // Here lies the magic. We mutate the Agent's ciphers to hide the Node.js TLS signature.
+        agent: new https.Agent({
+          ciphers: 'TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384',
+          honorCipherOrder: true,
+          minVersion: 'TLSv1.2'
+        }),
+
+        // We wear the skin of a Chrome browser flawlessly
+        headers: {
+          'Host': 'www.zee5.com',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'identity', // We demand uncompressed text to avoid zlib curses
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"'
+        }
+      };
+
+      // Sending the disguised request into the abyss
+      const request = https.request(options, (response) => {
+        if (response.statusCode === 403) {
+          reject(new Error(`The Wardens saw through our disguise. Status: 403`));
+          return;
+        }
+
+        let data = '';
+        
+        // Gathering the fragments of the HTML parchment
+        response.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        // When the transmission ceases, we search for the artifact
+        response.on('end', () => {
+          const tokenRegex = /"platformToken":"(eyJ[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+)"/;
+          const match = data.match(tokenRegex);
+          
+          if (match && match[1]) {
+            resolve(match[1]);
+          } else {
+            reject(new Error('The parchment was secured, but the token was stripped from its ink.'));
+          }
+        });
+      });
+
+      request.on('error', (err) => {
+        reject(new Error(`The connection was severed: ${err.message}`));
+      });
+
+      // Seal the spell and execute
+      request.end();
     });
 
-    // If the wardens reject us, we shall know exactly why
-    if (!response.ok) {
-      return res.status(response.status).json({ 
-        error: `The abyss stared back. Failed to fetch the target page.`,
-        statusCode: response.status,
-        statusText: response.statusText
-      });
-    }
-
-    const html = await response.text();
-
-    // We search the HTML tapestry for the elusive platform token
-    const tokenRegex = /"platformToken":"(eyJ[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+)"/;
-    const match = html.match(tokenRegex);
-
-    if (match && match[1]) {
-      const extractedToken = match[1];
-      
-      return res.status(200).json({
-        success: true,
-        token: extractedToken
-      });
-    } else {
-      return res.status(404).json({
-        success: false,
-        error: 'The parchment was found, but the token was torn from its pages.'
-      });
-    }
+    // If we survive, return the prize
+    return res.status(200).json({ 
+      success: true, 
+      token: token 
+    });
 
   } catch (error) {
-    console.error('A tragedy occurred in the darkness:', error);
-    return res.status(500).json({ 
+    console.error('The abyss consumed the request:', error.message);
+    return res.status(error.message.includes('403') ? 403 : 500).json({ 
       success: false, 
-      error: 'The server succumbed to an internal sorrow.' 
+      error: error.message 
     });
   }
 }

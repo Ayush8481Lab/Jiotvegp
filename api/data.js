@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
   // Helper function to safely fetch API data
   const fetchApiData = async (url, customHeaders) => {
-    if (!url) return { raw: [] }; // Catch empty URL if API 1 is not pasted yet
+    if (!url) return { raw: [] }; 
     
     try {
       const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;
@@ -42,7 +42,6 @@ export default async function handler(req, res) {
         if (Array.isArray(data)) return { raw: data };
         
         if (data && typeof data === 'object') {
-          // Explicitly target the "channels" array inside API 4's structure
           if (Array.isArray(data.channels)) return { raw: data.channels };
           
           for (const key of Object.keys(data)) {
@@ -66,7 +65,7 @@ export default async function handler(req, res) {
     return group.includes('sport') || category.includes('sport');
   };
 
-  // Helper function to smartly append the cookie to the streaming URL
+  // Helper function to smartly append the UNIQUE cookie to the streaming URL
   const generateStreamUrl = (base, cookie) => {
     if (!base) return "";
     if (!cookie) return base;
@@ -81,7 +80,6 @@ export default async function handler(req, res) {
     let cacheSeconds = 0;
     
     if (api4DataArray && api4DataArray.length > 0) {
-      // Find an item with the cookie_expire field
       const channelWithExpiry = api4DataArray.find(item => item.cookie_expire);
       
       if (channelWithExpiry && channelWithExpiry.cookie_expire) {
@@ -90,17 +88,14 @@ export default async function handler(req, res) {
         
         // 3 Hours = 10800 Seconds
         if (timeRemaining > 10800) {
-          // Cache exactly for the difference until 3 hours are left
           cacheSeconds = timeRemaining - 10800;
         }
       }
     }
 
     if (cacheSeconds > 0) {
-      // Activate Vercel Edge caching
       res.setHeader('Cache-Control', `public, s-maxage=${cacheSeconds}, stale-while-revalidate=60`);
     } else {
-      // Expiry is under 3 hours: FORCE FRESH DATA every request
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
@@ -118,10 +113,8 @@ export default async function handler(req, res) {
     let responseData = raw;
 
     if (isApi4) {
-      // API 4: Apply dynamic cache headers, skip sports filtering since file is "sports.json"
       applyDynamicCaching(raw);
     } else {
-      // APIs 1, 2, 3: Filter by sports, turn cache off completely
       responseData = raw.filter(isSports);
       res.setHeader('Cache-Control', 'no-store, max-age=0');
     }
@@ -131,7 +124,6 @@ export default async function handler(req, res) {
 
   // ====================================================================
   // CASE 2: Combined Unified Request (No query params)
-  // Maps all 4 APIs to a unified layout seamlessly
   // ====================================================================
   const [res1, res2, res3, res4] = await Promise.all([
     fetchApiData(API_URLS[1], standardHeaders),
@@ -154,8 +146,8 @@ export default async function handler(req, res) {
           id: String(item.id || ""),
           category: "SPORTS1",
           url: generateStreamUrl(base, cookie),
-          keyId: item.keyId || "",
-          key: item.key || "",
+          keyId: item.keyId ? String(item.keyId) : "null",
+          key: item.key ? String(item.key) : "null",
           logo: item.logo || ""
         });
       }
@@ -166,13 +158,14 @@ export default async function handler(req, res) {
   if (res2 && res2.raw) {
     res2.raw.forEach(item => {
       if (isSports(item)) {
-        let keyId = "";
-        let key = "";
+        let keyId = "null";
+        let key = "null";
+        
         if (item.clearkey && typeof item.clearkey === 'object') {
           const keys = Object.keys(item.clearkey);
           if (keys.length > 0) {
-            keyId = keys[0];
-            key = item.clearkey[keyId];
+            keyId = String(keys[0]);
+            key = String(item.clearkey[keys[0]]);
           }
         }
 
@@ -204,8 +197,8 @@ export default async function handler(req, res) {
           id: String(item.id || ""),
           category: "SPORTS3",
           url: generateStreamUrl(base, cookie),
-          keyId: item.keyId || "",
-          key: item.key || "",
+          keyId: item.keyId ? String(item.keyId) : "null",
+          key: item.key ? String(item.key) : "null",
           logo: item.logo || ""
         });
       }
@@ -214,7 +207,6 @@ export default async function handler(req, res) {
 
   // 4. Process API 4 (SPORTS4)
   if (res4 && res4.raw) {
-    // Apply dynamic caching to the entire combined output based on API 4's data
     applyDynamicCaching(res4.raw);
 
     res4.raw.forEach(item => {
@@ -226,15 +218,14 @@ export default async function handler(req, res) {
         id: String(item.id || ""),
         category: "SPORTS4",
         url: generateStreamUrl(base, cookie),
-        keyId: item.key_id || "",
-        key: item.key || "",
+        keyId: item.key_id ? String(item.key_id) : "null",
+        key: item.key ? String(item.key) : "null",
         logo: item.logo || ""
       });
     });
   } else {
-    // Fallback if API 4 fails completely
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 
   return res.status(200).json(combinedResponse);
-}
+        }

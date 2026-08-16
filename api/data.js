@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   const API_URLS = {
     // 👇 PASTE YOUR GITHUB RAW LINK INSIDE THE QUOTES BELOW 👇
-    1: '', 
+    1: 'https://raw.githubusercontent.com/Ayush8481Lab/Mm/refs/heads/main/Jiohot', 
     2: 'https://tiny-flower-1d4d.shoeb66445.workers.dev/',
     3: 'https://myjioapi.bmera5952.workers.dev/',
     4: 'https://sonujson-devloper.vercel.app/Data/sports.json'

@@ -66,6 +66,14 @@ export default async function handler(req, res) {
     return group.includes('sport') || category.includes('sport');
   };
 
+  // Helper function to smartly append the cookie to the streaming URL
+  const generateStreamUrl = (base, cookie) => {
+    if (!base) return "";
+    if (!cookie) return base;
+    const separator = base.includes('?') ? '&' : '?';
+    return `${base}${separator}${cookie.trim()}`;
+  };
+
   // ---------------------------------------------------------
   // CACHE ENGINE FOR API 4
   // ---------------------------------------------------------
@@ -138,11 +146,14 @@ export default async function handler(req, res) {
   if (res1 && res1.raw) {
     res1.raw.forEach(item => {
       if (isSports(item)) {
+        let base = item.mpd_url || item.url || item.mpd || "";
+        let cookie = item.cookie || (item.headers && item.headers.cookie) || "";
+
         combinedResponse.push({
           name: item.name || "",
           id: String(item.id || ""),
           category: "SPORTS1",
-          url: item.mpd_url || item.url || item.mpd || "",
+          url: generateStreamUrl(base, cookie),
           keyId: item.keyId || "",
           key: item.key || "",
           logo: item.logo || ""
@@ -164,11 +175,15 @@ export default async function handler(req, res) {
             key = item.clearkey[keyId];
           }
         }
+
+        let base = item.mpd_url || item.url || item.mpd || "";
+        let cookie = (item.headers && item.headers.cookie) || item.cookie || "";
+
         combinedResponse.push({
           name: item.name || "",
           id: String(item.id || ""),
           category: "SPORTS2",
-          url: item.mpd_url || item.url || item.mpd || "",
+          url: generateStreamUrl(base, cookie),
           keyId: keyId,
           key: key,
           logo: item.logo || ""
@@ -181,11 +196,14 @@ export default async function handler(req, res) {
   if (res3 && res3.raw) {
     res3.raw.forEach(item => {
       if (isSports(item)) {
+        let base = item.mpd || item.mpd_url || item.url || "";
+        let cookie = item.cookie || (item.headers && item.headers.cookie) || "";
+
         combinedResponse.push({
           name: item.name || "",
           id: String(item.id || ""),
           category: "SPORTS3",
-          url: item.mpd || item.mpd_url || item.url || "",
+          url: generateStreamUrl(base, cookie),
           keyId: item.keyId || "",
           key: item.key || "",
           logo: item.logo || ""
@@ -200,12 +218,15 @@ export default async function handler(req, res) {
     applyDynamicCaching(res4.raw);
 
     res4.raw.forEach(item => {
+      let base = item.stream_url || "";
+      let cookie = item.cookie || "";
+
       combinedResponse.push({
         name: item.name || "",
         id: String(item.id || ""),
         category: "SPORTS4",
-        url: item.stream_url || "", // Custom mapping for API 4 URL
-        keyId: item.key_id || "",   // Custom mapping for API 4 key_id
+        url: generateStreamUrl(base, cookie),
+        keyId: item.key_id || "",
         key: item.key || "",
         logo: item.logo || ""
       });

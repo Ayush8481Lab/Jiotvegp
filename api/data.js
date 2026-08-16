@@ -3,7 +3,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
-  const { api } = req.query;
+  const { api, debug } = req.query;
 
   const API_URLS = {
     1: 'https://premiumplugx.me/hotstar/hotstar.json',
@@ -11,61 +11,81 @@ export default async function handler(req, res) {
     3: 'https://myjioapi.bmera5952.workers.dev/'
   };
 
-  // Upgraded headers to prevent bot-detection/Cloudflare blocks
+  // Ultra-realistic browser headers to bypass bot protection
   const headers = {
-    'Referer': 'https://premiumplugx.me/',
+    'Referer': 'https://premiumplugx.me', // Removed trailing slash just in case
     'Origin': 'https://premiumplugx.me',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'keep-alive'
   };
 
-  // Helper function to safely fetch and parse API data
+  // Advanced fetch function that grabs data and handles errors/blocks
   const fetchApiData = async (url) => {
     try {
-      const response = await fetch(url, { 
-        headers, 
-        cache: 'no-store' // CRITICAL: Fixes the issue where Vercel returns blank cached data
-      });
+      // Added a random timestamp to bypass aggressive file caching
+      const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;
       
-      if (!response.ok) return [];
-      
-      // Fetch as text first to avoid crashing if the server sends HTML instead of JSON
+      const response = await fetch(fetchUrl, { headers, cache: 'no-store' });
       const text = await response.text();
+
       try {
         const data = JSON.parse(text);
-        return Array.isArray(data) ? data : [];
+        
+        // If data is a direct array, return it
+        if (Array.isArray(data)) return { raw: data, text };
+        
+        // If API wrapped the array inside an object (e.g., { "channels": [...] })
+        if (data && typeof data === 'object') {
+          for (const key of Object.keys(data)) {
+            if (Array.isArray(data[key])) return { raw: data[key], text };
+          }
+        }
+        
+        return { raw: [], text };
       } catch (err) {
-        console.error(`Failed to parse JSON from ${url}`);
-        return [];
+        // If JSON.parse fails (usually means Cloudflare blocked Vercel and sent HTML)
+        return { raw: [], text, error: 'Failed to parse JSON. Server likely sent HTML.' };
       }
     } catch (error) {
-      console.error(`Network Error fetching ${url}:`, error.message);
-      return []; // Return empty array on failure so Promise.all won't break
+      return { raw: [], text: '', error: error.message };
     }
   };
 
-  // Robust check to match "Sports", "sports", "SPORT", etc., in any field
+  // Flexible check to match "Sports", "sports", "SPORT", etc.
   const isSports = (item) => {
-    const group = String(item.group || "").toLowerCase();
-    const category = String(item.category || "").toLowerCase();
+    if (!item) return false;
+    const group = String(item.group || item.Group || "").toLowerCase();
+    const category = String(item.category || item.Category || "").toLowerCase();
     return group.includes('sport') || category.includes('sport');
   };
 
   // ====================================================================
-  // CASE 1: Individual API Request (e.g., ?api=1, ?api=2, ?api=3)
-  // No formatting, just filter by Sports group/category.
+  // CASE 1: Individual Raw Request (e.g., ?api=1, ?api=2)
   // ====================================================================
   if (api && API_URLS[api]) {
-    const data = await fetchApiData(API_URLS[api]);
-    const sportsData = data.filter(isSports);
+    const { raw, text, error } = await fetchApiData(API_URLS[api]);
+    
+    // SECRET DEBUG MODE: If you go to /api/data?api=1&debug=true
+    // It will show you EXACTLY what the premiumplugx server is responding with.
+    if (debug === 'true') {
+      return res.status(200).json({ 
+        fetchStatus: error ? "Failed" : "Success", 
+        errorFound: error || "None",
+        rawTextReceived: text, 
+        parsedArray: raw 
+      });
+    }
+
+    const sportsData = raw.filter(isSports);
     return res.status(200).json(sportsData);
   }
 
   // ====================================================================
-  // CASE 2: Combined Request (No query params)
-  // Fetch from all 3 APIs, format into unified structure
+  // CASE 2: Combined Unified Request (No query params)
   // ====================================================================
-  const [data1, data2, data3] = await Promise.all([
+  const [res1, res2, res3] = await Promise.all([
     fetchApiData(API_URLS[1]),
     fetchApiData(API_URLS[2]),
     fetchApiData(API_URLS[3])
@@ -73,8 +93,8 @@ export default async function handler(req, res) {
 
   const combinedResponse = [];
 
-  // 1. Process API 1 (Format to Category: SPORTS1)
-  data1.forEach(item => {
+  // 1. Process API 1 (SPORTS1)
+  res1.raw.forEach(item => {
     if (isSports(item)) {
       combinedResponse.push({
         name: item.name || "",
@@ -88,13 +108,11 @@ export default async function handler(req, res) {
     }
   });
 
-  // 2. Process API 2 (Format to Category: SPORTS2)
-  data2.forEach(item => {
+  // 2. Process API 2 (SPORTS2)
+  res2.raw.forEach(item => {
     if (isSports(item)) {
       let keyId = "";
       let key = "";
-      
-      // Extract keyId and key from the "clearkey" object
       if (item.clearkey && typeof item.clearkey === 'object') {
         const keys = Object.keys(item.clearkey);
         if (keys.length > 0) {
@@ -102,7 +120,6 @@ export default async function handler(req, res) {
           key = item.clearkey[keyId];
         }
       }
-
       combinedResponse.push({
         name: item.name || "",
         id: String(item.id || ""),
@@ -115,15 +132,14 @@ export default async function handler(req, res) {
     }
   });
 
-  // 3. Process API 3 (Format to Category: SPORTS3)
-  data3.forEach(item => {
+  // 3. Process API 3 (SPORTS3)
+  res3.raw.forEach(item => {
     if (isSports(item)) {
       combinedResponse.push({
         name: item.name || "",
         id: String(item.id || ""),
         category: "SPORTS3",
-        // API 3 uses "mpd" instead of "mpd_url", this logic ensures we catch whichever is available
-        url: item.mpd || item.mpd_url || item.url || "", 
+        url: item.mpd || item.mpd_url || item.url || "",
         keyId: item.keyId || "",
         key: item.key || "",
         logo: item.logo || ""
@@ -131,6 +147,5 @@ export default async function handler(req, res) {
     }
   });
 
-  // Return the unified data
   return res.status(200).json(combinedResponse);
 }

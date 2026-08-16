@@ -1,15 +1,9 @@
 export default async function handler(req, res) {
-  // Set CORS headers just in case you call this from a frontend
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
   const { api } = req.query;
-
-  // The Referer header required for all 3 APIs
-  const headers = {
-    'Referer': 'https://premiumplugx.me',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-  };
 
   const API_URLS = {
     1: 'https://premiumplugx.me/hotstar/hotstar.json',
@@ -17,17 +11,44 @@ export default async function handler(req, res) {
     3: 'https://myjioapi.bmera5952.workers.dev/'
   };
 
-  // Helper function to safely fetch API data without crashing if one fails
+  // Upgraded headers to prevent bot-detection/Cloudflare blocks
+  const headers = {
+    'Referer': 'https://premiumplugx.me/',
+    'Origin': 'https://premiumplugx.me',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*'
+  };
+
+  // Helper function to safely fetch and parse API data
   const fetchApiData = async (url) => {
     try {
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { 
+        headers, 
+        cache: 'no-store' // CRITICAL: Fixes the issue where Vercel returns blank cached data
+      });
+      
       if (!response.ok) return [];
-      const data = await response.json();
-      return Array.isArray(data) ? data : [];
+      
+      // Fetch as text first to avoid crashing if the server sends HTML instead of JSON
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        return Array.isArray(data) ? data : [];
+      } catch (err) {
+        console.error(`Failed to parse JSON from ${url}`);
+        return [];
+      }
     } catch (error) {
-      console.error(`Error fetching ${url}:`, error.message);
+      console.error(`Network Error fetching ${url}:`, error.message);
       return []; // Return empty array on failure so Promise.all won't break
     }
+  };
+
+  // Robust check to match "Sports", "sports", "SPORT", etc., in any field
+  const isSports = (item) => {
+    const group = String(item.group || "").toLowerCase();
+    const category = String(item.category || "").toLowerCase();
+    return group.includes('sport') || category.includes('sport');
   };
 
   // ====================================================================
@@ -36,13 +57,7 @@ export default async function handler(req, res) {
   // ====================================================================
   if (api && API_URLS[api]) {
     const data = await fetchApiData(API_URLS[api]);
-    
-    // Filter only "Sports" group
-    const sportsData = data.filter(item => 
-      (item.group && item.group.toLowerCase() === 'sports') || 
-      (item.category && item.category.toLowerCase() === 'sports')
-    );
-    
+    const sportsData = data.filter(isSports);
     return res.status(200).json(sportsData);
   }
 
@@ -60,12 +75,12 @@ export default async function handler(req, res) {
 
   // 1. Process API 1 (Format to Category: SPORTS1)
   data1.forEach(item => {
-    if (item.group && item.group.toLowerCase() === 'sports') {
+    if (isSports(item)) {
       combinedResponse.push({
-        name: item.name,
-        id: String(item.id),
+        name: item.name || "",
+        id: String(item.id || ""),
         category: "SPORTS1",
-        url: item.mpd_url,
+        url: item.mpd_url || item.url || item.mpd || "",
         keyId: item.keyId || "",
         key: item.key || "",
         logo: item.logo || ""
@@ -75,7 +90,7 @@ export default async function handler(req, res) {
 
   // 2. Process API 2 (Format to Category: SPORTS2)
   data2.forEach(item => {
-    if (item.group && item.group.toLowerCase() === 'sports') {
+    if (isSports(item)) {
       let keyId = "";
       let key = "";
       
@@ -89,10 +104,10 @@ export default async function handler(req, res) {
       }
 
       combinedResponse.push({
-        name: item.name,
-        id: String(item.id),
+        name: item.name || "",
+        id: String(item.id || ""),
         category: "SPORTS2",
-        url: item.mpd_url,
+        url: item.mpd_url || item.url || item.mpd || "",
         keyId: keyId,
         key: key,
         logo: item.logo || ""
@@ -102,12 +117,13 @@ export default async function handler(req, res) {
 
   // 3. Process API 3 (Format to Category: SPORTS3)
   data3.forEach(item => {
-    if (item.group && item.group.toLowerCase() === 'sports') {
+    if (isSports(item)) {
       combinedResponse.push({
-        name: item.name,
-        id: String(item.id),
+        name: item.name || "",
+        id: String(item.id || ""),
         category: "SPORTS3",
-        url: item.mpd_url,
+        // API 3 uses "mpd" instead of "mpd_url", this logic ensures we catch whichever is available
+        url: item.mpd || item.mpd_url || item.url || "", 
         keyId: item.keyId || "",
         key: item.key || "",
         logo: item.logo || ""

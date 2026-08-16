@@ -3,81 +3,62 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
-  const { api, debug } = req.query;
+  const { api } = req.query;
 
   const API_URLS = {
-    1: 'https://premiumplugx.me/hotstar/hotstar.json',
+    // 👇 PASTE YOUR GITHUB RAW LINK INSIDE THE QUOTES BELOW 👇
+    1: '', 
     2: 'https://tiny-flower-1d4d.shoeb66445.workers.dev/',
-    3: 'https://myjioapi.bmera5952.workers.dev/'
+    3: 'https://myjioapi.bmera5952.workers.dev/',
+    4: 'https://sonujson-devloper.vercel.app/Data/sports.json'
   };
 
-  // Advanced Fetch Engine to bypass Cloudflare's "Just a moment..." challenge
-  const fetchApiData = async (url) => {
-    // We try multiple disguises (User-Agents) to trick Cloudflare
-    const userAgentsToTry = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)', // Bypass 1: Googlebot
-      'ExoPlayer/2.18.1 (Linux; Android 11)', // Bypass 2: Media Player
-      'Hotstar;in.startv.hotstar/12.4.5 (Android/11)' // Bypass 3: App UA
-    ];
+  // Headers for API 1, 2, and 3 (Using referer)
+  const standardHeaders = {
+    'Referer': 'https://premiumplugx.me',
+    'Origin': 'https://premiumplugx.me',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*'
+  };
 
-    let lastText = "";
-    let lastError = "";
+  // Headers for API 4 (No referer, standard request)
+  const noRefererHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json'
+  };
 
-    // Strategy 1: Direct fetch with rotating identities
-    for (const ua of userAgentsToTry) {
+  // Helper function to safely fetch API data
+  const fetchApiData = async (url, customHeaders) => {
+    if (!url) return { raw: [] }; // Catch empty URL if API 1 is not pasted yet
+    
+    try {
+      const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;
+      const response = await fetch(fetchUrl, { headers: customHeaders, cache: 'no-store' });
+      const text = await response.text();
+
       try {
-        const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;
-        const response = await fetch(fetchUrl, {
-          headers: {
-            'Referer': 'https://premiumplugx.me',
-            'User-Agent': ua,
-            'Accept': 'application/json, text/plain, */*'
-          },
-          cache: 'no-store'
-        });
+        const data = JSON.parse(text);
         
-        lastText = await response.text();
-
-        // If Cloudflare blocks us, skip to the next disguise
-        if (lastText.includes('Just a moment...') || lastText.includes('__cf_chl_tk')) {
-          lastError = "Cloudflare Blocked";
-          continue; 
-        }
-
-        // Try to parse the clean JSON
-        const data = JSON.parse(lastText);
-        if (Array.isArray(data)) return { raw: data, text: lastText, error: null };
+        if (Array.isArray(data)) return { raw: data };
         
-        // Handle if JSON is wrapped in an object
         if (data && typeof data === 'object') {
+          // Explicitly target the "channels" array inside API 4's structure
+          if (Array.isArray(data.channels)) return { raw: data.channels };
+          
           for (const key of Object.keys(data)) {
-            if (Array.isArray(data[key])) return { raw: data[key], text: lastText, error: null };
+            if (Array.isArray(data[key])) return { raw: data[key] };
           }
         }
+        return { raw: [] };
       } catch (err) {
-        // Not valid JSON, continue loop
-        continue;
+        return { raw: [] };
       }
+    } catch (error) {
+      return { raw: [] };
     }
-
-    // Strategy 2: If Cloudflare completely blocks Vercel, route through a proxy
-    try {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl, { cache: 'no-store' });
-      lastText = await response.text();
-      const data = JSON.parse(lastText);
-      
-      if (Array.isArray(data)) return { raw: data, text: lastText, error: null };
-    } catch (err) {
-      lastError = "Proxy fallback also failed.";
-    }
-
-    // If ALL methods fail (API is down or heavily protected), return empty gracefully
-    return { raw: [], text: lastText, error: lastError };
   };
 
-  // Flexible check to strictly match "Sports" category
+  // Flexible check to strictly match "Sports" category for APIS 1, 2, and 3
   const isSports = (item) => {
     if (!item) return false;
     const group = String(item.group || item.Group || "").toLowerCase();
@@ -85,35 +66,70 @@ export default async function handler(req, res) {
     return group.includes('sport') || category.includes('sport');
   };
 
-  // ====================================================================
-  // CASE 1: Individual Raw Request (e.g., ?api=1, ?api=2)
-  // No formatting, just filter by Sports category
-  // ====================================================================
-  if (api && API_URLS[api]) {
-    const { raw, text, error } = await fetchApiData(API_URLS[api]);
+  // ---------------------------------------------------------
+  // CACHE ENGINE FOR API 4
+  // ---------------------------------------------------------
+  const applyDynamicCaching = (api4DataArray) => {
+    let cacheSeconds = 0;
     
-    // Debug mode (keep this so you can check if proxy fails later)
-    if (debug === 'true') {
-      return res.status(200).json({ 
-        fetchStatus: raw.length > 0 ? "Success" : "Failed", 
-        errorFound: error || "None",
-        rawTextReceived: text, 
-        parsedArray: raw 
-      });
+    if (api4DataArray && api4DataArray.length > 0) {
+      // Find an item with the cookie_expire field
+      const channelWithExpiry = api4DataArray.find(item => item.cookie_expire);
+      
+      if (channelWithExpiry && channelWithExpiry.cookie_expire) {
+        const currentEpochSeconds = Math.floor(Date.now() / 1000);
+        const timeRemaining = channelWithExpiry.cookie_expire - currentEpochSeconds;
+        
+        // 3 Hours = 10800 Seconds
+        if (timeRemaining > 10800) {
+          // Cache exactly for the difference until 3 hours are left
+          cacheSeconds = timeRemaining - 10800;
+        }
+      }
     }
 
-    const sportsData = raw.filter(isSports);
-    return res.status(200).json(sportsData);
+    if (cacheSeconds > 0) {
+      // Activate Vercel Edge caching
+      res.setHeader('Cache-Control', `public, s-maxage=${cacheSeconds}, stale-while-revalidate=60`);
+    } else {
+      // Expiry is under 3 hours: FORCE FRESH DATA every request
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  };
+
+  // ====================================================================
+  // CASE 1: Individual Raw Request (e.g., ?api=1, ?api=4)
+  // ====================================================================
+  if (api && API_URLS[api]) {
+    const isApi4 = api === '4';
+    const fetchHeaders = isApi4 ? noRefererHeaders : standardHeaders;
+    const { raw } = await fetchApiData(API_URLS[api], fetchHeaders);
+    
+    let responseData = raw;
+
+    if (isApi4) {
+      // API 4: Apply dynamic cache headers, skip sports filtering since file is "sports.json"
+      applyDynamicCaching(raw);
+    } else {
+      // APIs 1, 2, 3: Filter by sports, turn cache off completely
+      responseData = raw.filter(isSports);
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+    }
+
+    return res.status(200).json(responseData);
   }
 
   // ====================================================================
   // CASE 2: Combined Unified Request (No query params)
-  // Even if API 1 fails, API 2 and 3 will seamlessly map their data
+  // Maps all 4 APIs to a unified layout seamlessly
   // ====================================================================
-  const [res1, res2, res3] = await Promise.all([
-    fetchApiData(API_URLS[1]),
-    fetchApiData(API_URLS[2]),
-    fetchApiData(API_URLS[3])
+  const [res1, res2, res3, res4] = await Promise.all([
+    fetchApiData(API_URLS[1], standardHeaders),
+    fetchApiData(API_URLS[2], standardHeaders),
+    fetchApiData(API_URLS[3], standardHeaders),
+    fetchApiData(API_URLS[4], noRefererHeaders)
   ]);
 
   const combinedResponse = [];
@@ -176,6 +192,27 @@ export default async function handler(req, res) {
         });
       }
     });
+  }
+
+  // 4. Process API 4 (SPORTS4)
+  if (res4 && res4.raw) {
+    // Apply dynamic caching to the entire combined output based on API 4's data
+    applyDynamicCaching(res4.raw);
+
+    res4.raw.forEach(item => {
+      combinedResponse.push({
+        name: item.name || "",
+        id: String(item.id || ""),
+        category: "SPORTS4",
+        url: item.stream_url || "", // Custom mapping for API 4 URL
+        keyId: item.key_id || "",   // Custom mapping for API 4 key_id
+        key: item.key || "",
+        logo: item.logo || ""
+      });
+    });
+  } else {
+    // Fallback if API 4 fails completely
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 
   return res.status(200).json(combinedResponse);

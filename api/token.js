@@ -4,7 +4,7 @@ export const config = { regions: ['bom1'] };
 
 // 40 ScraperAPI Keys provided – the arsenal of the many‑faced proxy
 const SCRAPER_KEYS = [
-    "91abe2dbb5fd21cb3e2fdf54ee46a735", "9216ad1845c11442e59d4f185b1ae640",
+    "ec6e4bb4927a673b23f539061e0c3cc1", "9216ad1845c11442e59d4f185b1ae640",
   "bfb08ca10f4299b292d9944127b6cf3f", "29a1775866177f1a711a4ec42cc61aea",
   "5d1046737b9fc6ccc36c0d48a601b85d", "85f58709712a420f495dbab6f1693330",
   "dfece35805080536808468a784fcd631", "335259612b2f462a99b8666d4863e675",
@@ -48,7 +48,7 @@ async function fetchWithKeyRotation() {
   const baseParams = 'country_code=in&url=https://www.zee5.com/live-tv/zee-news/0-9-zeenews';
 
   for (const key of SCRAPER_KEYS) {
-    const targetUrl = `https://api.scraperapi.com/?api_key=${key}&${baseParams}&premium=true`;
+    const targetUrl = `https://api.scraperapi.com/?api_key=${key}&${baseParams}`;
     try {
       const response = await fetch(targetUrl, { headers: REQUEST_HEADERS });
       if (response.ok) {

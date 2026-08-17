@@ -27,13 +27,25 @@ export default async function handler(req, res) {
     'Accept': 'application/json'
   };
 
-  // Helper function to safely fetch API data
+  // Helper function to safely fetch API data with a strict 5-second timeout
   const fetchApiData = async (url, customHeaders) => {
     if (!url) return { raw: [] }; 
     
+    // Create an AbortController to kill the request if it exceeds 5 seconds
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5000ms = 5 seconds
+
     try {
       const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;
-      const response = await fetch(fetchUrl, { headers: customHeaders, cache: 'no-store' });
+      
+      const response = await fetch(fetchUrl, { 
+        headers: customHeaders, 
+        cache: 'no-store',
+        signal: controller.signal // Attach the abort signal
+      });
+      
+      clearTimeout(timeoutId); // Clear timeout if fetch succeeds within 5 seconds
+      
       const text = await response.text();
 
       try {
@@ -50,9 +62,11 @@ export default async function handler(req, res) {
         }
         return { raw: [] };
       } catch (err) {
-        return { raw: [] };
+        return { raw: [] }; // Fails safely if JSON is invalid
       }
     } catch (error) {
+      clearTimeout(timeoutId);
+      // If it aborted due to timeout, or failed for any other reason, return empty safely
       return { raw: [] };
     }
   };
@@ -206,7 +220,7 @@ export default async function handler(req, res) {
   }
 
   // 4. Process API 4 (SPORTS4)
-  if (res4 && res4.raw) {
+  if (res4 && res4.raw && res4.raw.length > 0) {
     applyDynamicCaching(res4.raw);
 
     res4.raw.forEach(item => {
@@ -224,6 +238,7 @@ export default async function handler(req, res) {
       });
     });
   } else {
+    // If API 4 timeouts or fails completely
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 
@@ -263,4 +278,4 @@ export default async function handler(req, res) {
   });
 
   return res.status(200).json(combinedResponse);
-}
+      }

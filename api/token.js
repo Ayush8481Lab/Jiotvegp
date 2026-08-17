@@ -48,7 +48,7 @@ async function fetchWithKeyRotation() {
   const baseParams = 'country_code=in&url=https://www.zee5.com/live-tv/zee-news/0-9-zeenews';
 
   for (const key of SCRAPER_KEYS) {
-    const targetUrl = `https://api.scraperapi.com/?api_key=${key}&${baseParams}`;
+    const targetUrl = `https://api.scraperapi.com/?api_key=${key}&${baseParams}&premium=true`;
     try {
       const response = await fetch(targetUrl, { headers: REQUEST_HEADERS });
       if (response.ok) {

@@ -220,12 +220,47 @@ export default async function handler(req, res) {
         url: generateStreamUrl(base, cookie),
         keyId: item.key_id ? String(item.key_id) : "null",
         key: item.key ? String(item.key) : "null",
-        logo: item.logo || ""
+        logo: item.logo || "" // Will be populated dynamically in the next step
       });
     });
   } else {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 
+  // ====================================================================
+  // SMART LOGO SHARING ENGINE
+  // Extracts logos from APIs that have them and assigns to channels without them
+  // ====================================================================
+  
+  const logoMap = {};
+  
+  // Normalizes name: Lowercase -> Removes HD/SD tags -> Removes spaces/special characters
+  const normalizeName = (name) => {
+    return String(name)
+      .toLowerCase()
+      .replace(/\b(hd|sd)\b/g, '') 
+      .replace(/[^a-z0-9]/g, '');
+  };
+
+  // Pass 1: Collect available logos
+  combinedResponse.forEach(item => {
+    if (item.name && item.logo && item.logo !== "") {
+      const normName = normalizeName(item.name);
+      if (!logoMap[normName]) {
+        logoMap[normName] = item.logo;
+      }
+    }
+  });
+
+  // Pass 2: Inject missing logos
+  combinedResponse.forEach(item => {
+    if ((!item.logo || item.logo === "") && item.name) {
+      const normName = normalizeName(item.name);
+      if (logoMap[normName]) {
+        item.logo = logoMap[normName]; // Only modifies the logo, leaves everything else intact
+      }
+    }
+  });
+
   return res.status(200).json(combinedResponse);
-        }
+}

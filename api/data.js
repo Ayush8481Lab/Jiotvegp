@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     
     // Create an AbortController to kill the request if it exceeds 5 seconds
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5000ms = 5 seconds
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 5000ms = 5 seconds
 
     try {
       const fetchUrl = url.includes('.json') ? `${url}?t=${Date.now()}` : url;

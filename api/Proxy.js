@@ -1,43 +1,72 @@
 export const config = {
-  runtime: 'edge', // Use Edge runtime for better performance
+  runtime: 'edge',
 };
 
 export default async function handler(req) {
   try {
-    const url = new URL(req.url);
-    
-    // The target domain you want to proxy to
-    const TARGET_BASE_URL = 'https://api.example.com';
-    
-    // Optional: Remove the `/api/proxy` part from the path if needed
-    // Example: /api/proxy/users?id=1 -> /users?id=1
-    const targetPath = url.pathname.replace(/^\/api\/proxy/, '');
-    const targetUrl = `${TARGET_BASE_URL}${targetPath}${url.search}`;
+    // 1. Get the raw, full incoming URL from the request
+    // Example: "https://your-app.vercel.app/api/proxy/https://target.com/api?a=1&b=2"
+    const incomingUrl = req.url; 
 
-    // Clean up headers (remove the host header so the target server doesn't reject it)
+    // 2. Find exactly where "/api/proxy/" ends to extract the target URL
+    const proxyPrefix = '/api/proxy/';
+    const prefixIndex = incomingUrl.indexOf(proxyPrefix);
+    
+    if (prefixIndex === -1) {
+      return new Response(JSON.stringify({ error: "Invalid proxy route" }), { 
+        status: 400, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
+    // 3. Extract everything after "/api/proxy/". This perfectly preserves ?, &, =, etc.
+    let targetUrl = incomingUrl.substring(prefixIndex + proxyPrefix.length);
+
+    if (!targetUrl) {
+      return new Response(JSON.stringify({ error: "Missing target URL. Example: /api/proxy/https://example.com?a=1" }), { 
+        status: 400, 
+        headers: { 'Content-Type': 'application/json' } 
+      });
+    }
+
+    // 4. Fix Vercel normalization bugs
+    // Sometimes Vercel's router turns "https://" into "https:/" when passed in a path. This fixes it.
+    if (targetUrl.startsWith('http:/') && !targetUrl.startsWith('http://')) {
+      targetUrl = targetUrl.replace('http:/', 'http://');
+    } else if (targetUrl.startsWith('https:/') && !targetUrl.startsWith('https://')) {
+      targetUrl = targetUrl.replace('https:/', 'https://');
+    } else if (!targetUrl.startsWith('http')) {
+      // If the user forgot http://, add https:// by default
+      targetUrl = 'https://' + targetUrl; 
+    }
+
+    // 5. Clean up headers so the target server doesn't block the request
     const headers = new Headers(req.headers);
     headers.delete('host');
     headers.delete('referer');
 
-    // Forward the request to the target
+    // 6. Fetch the target URL (GET request)
     const response = await fetch(targetUrl, {
       method: req.method,
       headers: headers,
-      body: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined,
-      redirect: 'manual', // Handle redirects manually to prevent unwanted loops
+      redirect: 'follow', // Follow redirects automatically
     });
 
-    // Return the response back to the client
+    // 7. Add CORS headers so your frontend can read the JSON or Text data
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set('Access-Control-Allow-Origin', '*'); 
+    responseHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+    // 8. Stream the JSON/Text response back directly to the client
     return new Response(response.body, {
       status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
+      headers: responseHeaders,
     });
     
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: "Proxy Failed", message: error.message }), {
       status: 500,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 }

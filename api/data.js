@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     1: 'https://raw.githubusercontent.com/Ayush8481Lab/Mm/refs/heads/main/Jiohot', 
     2: 'https://tiny-flower-1d4d.shoeb66445.workers.dev/',
     3: 'https://myjioapi.bmera5952.workers.dev/',
-    4: 'https://sonujson-devloper.vercel.app/Data/sports.json'
+    4: 'https://sonujson-v3.pages.dev/Data/sports.json'
   };
 
   // Headers for API 1, 2, and 3 (Using referer)

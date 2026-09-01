@@ -6,7 +6,7 @@ export const config = {
 };
 
 export default async function handler(req, context) {
-    const renderUrl = "https://renderprojectayush.onrender.com/";
+    const renderUrl = "https://ayushdatademo.onrender.com/app/login/refreshLogin.php";
 
     // 1. Create the background task (Fetch the Render URL)
     const wakeUpTask = fetch(renderUrl, { method: 'GET' })

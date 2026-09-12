@@ -4,7 +4,7 @@ export const config = { regions: ['bom1'] };
 
 // 40 ScraperAPI Keys provided – the arsenal of the many‑faced proxy
 const SCRAPER_KEYS = [
-    "ec6e4bb4927a673b23f539061e0c3cc1", "9216ad1845c11442e59d4f185b1ae640",
+  "ec6e4bb4927a673b23f539061e0c3cc1", "9216ad1845c11442e59d4f185b1ae640",
   "bfb08ca10f4299b292d9944127b6cf3f", "29a1775866177f1a711a4ec42cc61aea",
   "5d1046737b9fc6ccc36c0d48a601b85d", "85f58709712a420f495dbab6f1693330",
   "dfece35805080536808468a784fcd631", "335259612b2f462a99b8666d4863e675",
@@ -24,7 +24,6 @@ const SCRAPER_KEYS = [
   "314c277af2dc5768e8f0a1120d861fb4", "d75982bd04e32a1cce34950723dcf6bf",
   "5da98ea3c39a8a02825cdea80c136c9d", "ab9aae3c018c1a51b1c4ae30b3a71529",
   "c1148d79a5444d34f5fdba0ffecb6868", "f4aefc202d7eaf46881f6e9197df913a"
-
 ];
 
 // A sturdy disguise for the scraping sentinels
@@ -85,8 +84,8 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // We search the HTML tapestry for the elusive platform token
-    const tokenRegex = /"platformToken":"(eyJ[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+)"/;
+    // We search the HTML tapestry for the elusive platform token using the updated Regex structure
+    const tokenRegex = /"platform_token"\s*:\s*\{"token":"(eyJ[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+\.[a-zA-Z0-9\-_.]+)"\}/;
     const match = html.match(tokenRegex);
 
     if (match && match[1]) {

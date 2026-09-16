@@ -1,6 +1,6 @@
 export const config = {
     runtime: 'edge',
-    regions: ['bom1'], // Vercel stays in Mumbai, India
+    regions: ['bom1'], // Force Mumbai, India server
 };
 
 export default async function handler(req) {
@@ -15,42 +15,56 @@ export default async function handler(req) {
         });
     }
 
-    // 1. Extract AND Decode the URL (fixes the %3A%2F%2F issue)
     const rawTargetUrl = urlStr.substring(urlIndex + urlParamString.length);
     const targetUrl = decodeURIComponent(rawTargetUrl);
     
     // ==========================================
-    // PASTE YOUR APIFY API URL BELOW
+    // PASTE ONLY YOUR APIFY API TOKEN BELOW
     // ==========================================
-    const APIFY_API_URL = "https://api.apify.com/v2/actors/apify~web-scraper/runs?token=apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS&memory=256";
+    const APIFY_TOKEN = "apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS";
+
+    // We automatically use Cheerio Scraper, limit memory to 256MB to save free tier, 
+    // and use the Sync endpoint to get the dataset data instantly.
+    const APIFY_API_URL = `https://api.apify.com/v2/acts/apify~cheerio-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&memory=256`;
 
     try {
-        // 2. Format the input EXACTLY how Apify wants it, with Indian region!
         const apifyInput = {
-            // Fixes the Apify "startUrls is required" error
-            startUrls: [{ url: targetUrl }], 
+            startUrls: [{ url: targetUrl }],
             
-            // Forces Apify to use Indian IPs to bypass geo-blocks
+            // Force Indian IPs via Apify
             proxyConfiguration: {
                 useApifyProxy: true,
                 apifyProxyCountry: "IN" 
-            }
+            },
+
+            // Tell the scraper to accept the .mpd file (otherwise it ignores non-HTML files)
+            additionalMimeTypes: ["*/*"],
+            ignoreSslErrors: true,
+
+            // This lightweight function grabs exactly what you want: The Headers
+            pageFunction: `async function pageFunction(context) {
+                return {
+                    status: context.response.statusCode,
+                    headers: context.response.headers
+                };
+            }`
         };
 
         const apifyResponse = await fetch(APIFY_API_URL, {
             method: 'POST', 
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(apifyInput) 
         });
 
         const apifyData = await apifyResponse.json();
 
+        // The data comes back as an array. We pull the first item (your headers).
+        const resultData = Array.isArray(apifyData) && apifyData.length > 0 ? apifyData[0] : apifyData;
+
         return new Response(JSON.stringify({
             status: "success",
-            target_url: targetUrl, // This will now show the clean link
-            apify_response: apifyData
+            target_url: targetUrl,
+            apify_response: resultData // <--- Your headers will show up right here!
         }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -62,4 +76,4 @@ export default async function handler(req) {
             headers: { 'Content-Type': 'application/json' }
         });
     }
-}
+            }

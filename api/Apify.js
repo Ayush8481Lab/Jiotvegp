@@ -1,6 +1,8 @@
 export const config = {
+    // 1. We use the Edge network (Cloudflare) instead of standard Datacenters (AWS)
     runtime: 'edge',
-    regions: ['bom1'], // Vercel stays in India
+    // 2. We force the Cloudflare node in Mumbai, India
+    regions: ['bom1'], 
 };
 
 export default async function handler(req) {
@@ -15,55 +17,39 @@ export default async function handler(req) {
         });
     }
 
+    // Decode the URL safely
     const rawTargetUrl = urlStr.substring(urlIndex + urlParamString.length);
     const targetUrl = decodeURIComponent(rawTargetUrl);
-    
-    // ==========================================
-    // PASTE ONLY YOUR APIFY API TOKEN BELOW
-    // ==========================================
-    const APIFY_TOKEN = "apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS";
-
-    const APIFY_API_URL = `https://api.apify.com/v2/acts/apify~cheerio-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&memory=256`;
 
     try {
-        const apifyInput = {
-            // YOUR SUGGESTION: We now use a HEAD request!
-            startUrls: [{ 
-                url: targetUrl,
-                method: "HEAD" 
-            }],
-            
-            // THE FIX: We use Apify's default free proxies. 
-            // We removed the 'IN' country requirement so it stops throwing the 407 Error.
-            proxyConfiguration: {
-                useApifyProxy: true
-            },
-
-            additionalMimeTypes: ["*/*"],
-            ignoreSslErrors: true,
-            
-            pageFunction: `async function pageFunction(context) {
-                return {
-                    status: context.response.statusCode,
-                    headers: context.response.headers
-                };
-            }`
-        };
-
-        const apifyResponse = await fetch(APIFY_API_URL, {
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(apifyInput) 
+        // 3. Your idea: Use HEAD request to ignore the video body and get only headers
+        const response = await fetch(targetUrl, {
+            method: 'HEAD',
+            headers: {
+                // Disguise as a normal Windows Chrome browser
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Connection': 'keep-alive',
+                
+                // 4. IP SPOOFING: We inject headers telling Jio's CDN that the request 
+                // is actually coming from a real Jio 4G Mobile IP in India.
+                'X-Forwarded-For': '49.36.15.15', // Real Jio IP range
+                'X-Real-IP': '49.36.15.15',
+                'True-Client-IP': '49.36.15.15'
+            }
         });
 
-        const apifyData = await apifyResponse.json();
+        // 5. Extract all headers
+        const headers = {};
+        response.headers.forEach((value, key) => {
+            headers[key] = value;
+        });
 
-        const resultData = Array.isArray(apifyData) && apifyData.length > 0 ? apifyData[0] : apifyData;
-
+        // 6. Send the captured headers back to your screen!
         return new Response(JSON.stringify({
-            status: "success",
+            status: response.status,
             target_url: targetUrl,
-            apify_response: resultData // Headers will finally show here!
+            captured_headers: headers
         }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -75,4 +61,4 @@ export default async function handler(req) {
             headers: { 'Content-Type': 'application/json' }
         });
     }
-            }
+}

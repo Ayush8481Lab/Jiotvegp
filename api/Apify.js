@@ -1,6 +1,6 @@
 export const config = {
     runtime: 'edge',
-    regions: ['bom1'], // Force Mumbai, India server
+    regions: ['bom1'], // Vercel stays in India
 };
 
 export default async function handler(req) {
@@ -23,25 +23,25 @@ export default async function handler(req) {
     // ==========================================
     const APIFY_TOKEN = "apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS";
 
-    // We automatically use Cheerio Scraper, limit memory to 256MB to save free tier, 
-    // and use the Sync endpoint to get the dataset data instantly.
     const APIFY_API_URL = `https://api.apify.com/v2/acts/apify~cheerio-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&memory=256`;
 
     try {
         const apifyInput = {
-            startUrls: [{ url: targetUrl }],
+            // YOUR SUGGESTION: We now use a HEAD request!
+            startUrls: [{ 
+                url: targetUrl,
+                method: "HEAD" 
+            }],
             
-            // Force Indian IPs via Apify
+            // THE FIX: We use Apify's default free proxies. 
+            // We removed the 'IN' country requirement so it stops throwing the 407 Error.
             proxyConfiguration: {
-                useApifyProxy: true,
-                apifyProxyCountry: "IN" 
+                useApifyProxy: true
             },
 
-            // Tell the scraper to accept the .mpd file (otherwise it ignores non-HTML files)
             additionalMimeTypes: ["*/*"],
             ignoreSslErrors: true,
-
-            // This lightweight function grabs exactly what you want: The Headers
+            
             pageFunction: `async function pageFunction(context) {
                 return {
                     status: context.response.statusCode,
@@ -58,13 +58,12 @@ export default async function handler(req) {
 
         const apifyData = await apifyResponse.json();
 
-        // The data comes back as an array. We pull the first item (your headers).
         const resultData = Array.isArray(apifyData) && apifyData.length > 0 ? apifyData[0] : apifyData;
 
         return new Response(JSON.stringify({
             status: "success",
             target_url: targetUrl,
-            apify_response: resultData // <--- Your headers will show up right here!
+            apify_response: resultData // Headers will finally show here!
         }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }

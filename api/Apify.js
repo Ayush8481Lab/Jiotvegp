@@ -23,7 +23,7 @@ export default async function handler(req) {
     // ==========================================
     // 3. PASTE YOUR APIFY API URL BELOW
     // ==========================================
-    const APIFY_API_URL = "apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS";
+    const APIFY_API_URL = "https://api.apify.com/v2/actors/apify~web-scraper/runs?token=apify_api_3l37L64unZlCYdLTSSDDG52OalfaAu2ZUfnS";
 
     try {
         // 4. Forward the request to your Apify API

@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   try {
     const targetUrl =
-      'https://dishtv-api.revlet.net/service/api/v1/page/stream?path=video%2Fplay%2Ftrailer%2Fsonyliv-1700000659&stream_type=trailer&appVersion=1.0&versionCode=1.0';
+      'https://dishtv-api.revlet.net/service/api/v1/page/content?path=partner%2Fsonyliv&count=25';
 
     const upstream = await fetch(targetUrl, {
       method: 'GET',

@@ -18,7 +18,7 @@ export default async function handler(req, res) {
         'accept': 'application/json, text/plain, */*',
         'user-agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'box-id': 'd430f18d-81bb-9816-38ff-2ebf0f4c4f58',
+        'box-id': '8c9a8c81-b24f-a685-14c1-e9df23264144',
         'session-id': 'db392d41-4283-4e28-a024-07db367337d7',
         'tenant-code': 'dishtv',
         'referer': 'https://www.dishtv.in/',

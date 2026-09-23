@@ -1,38 +1,37 @@
-export default async function handler(req, res) {
-  // CORS headers so you can call it from anywhere
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', '*');
+// hello.js — works on all Node versions
+const https = require("https");
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+const API_URL =
+  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090476406";
 
-  try {
-    const targetUrl =
-      'https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090476406';
+const options = {
+  method: "POST",
+  headers: {
+    "cookie":
+      "sl_device_token=3a4f92a0919d4568931f657896b51b5a-1790188990243; " +
+      "sl_ppid=3a4f92a0919d4568931f657896b51b5a; " +
+      "ak_cf=g8f0-ju0v-w04o-3rxa",
+    "content-type": "application/json",
+    "accept": "application/json, text/plain, */*",
+    "user-agent": "Mozilla/5.0 (Linux; Android 13) Mobile Safari/537.36",
+    "origin": "https://www.sonyliv.com",
+    "referer": "https://www.sonyliv.com/",
+  },
+};
 
-    const upstream = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json, text/plain, */*',
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        "cookie": "sl_device_token=3a4f92a0919d4568931f657896b51b5a-1790188990243; sl_ppid=3a4f92a0919d4568931f657896b51b5a; ak_cf=g8f0-ju0v-w04o-3rxa",
-        
-        'referer': 'https://sonyliv.com/',
-        'origin': 'https://sonyliv.com,
-      },
-    });
+const req = https.request(API_URL, options, (res) => {
+  let body = "";
+  res.on("data", (chunk) => (body += chunk));
+  res.on("end", () => {
+    console.log("Status:", res.statusCode);
+    try {
+      console.log(JSON.stringify(JSON.parse(body), null, 2));
+    } catch {
+      console.log(body);
+    }
+  });
+});
 
-    const data = await upstream.json();
-
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(upstream.status).json(data);
-  } catch (err) {
-    return res.status(500).json({
-      error: 'Proxy request failed',
-      message: err.message,
-    });
-  }
-}
+req.on("error", (e) => console.error("Request failed:", e));
+req.write(JSON.stringify({}));
+req.end();

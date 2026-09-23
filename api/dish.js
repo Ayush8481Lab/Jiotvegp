@@ -1,16 +1,15 @@
-// api/hello.js
-// Vercel Serverless Function (Node.js runtime)
-// Deploy: place this file at /api/hello.js in your Vercel project.
-// Call: GET or POST https://<your-project>.vercel.app/api/hello
+// api/hello.js — Vercel Serverless Function
+// Mirrors the captured SonyLIV app request headers.
 
 export const config = {
   runtime: "nodejs",
 };
 
 const API_URL =
-  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090476406";
+  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
 
-// Cookies extracted from your export (order matters for some WAFs, keep as-is).
+// --- Cookies from your export ---
+// In production, set env var SONYLIV_COOKIE on Vercel to override.
 const COOKIES = {
   _fbp: "fb.1.1783693222101.247915258225897267",
   ak_bmsc:
@@ -38,39 +37,89 @@ const COOKIES = {
 };
 
 function buildCookieHeader() {
+  if (process.env.SONYLIV_COOKIE) return process.env.SONYLIV_COOKIE;
   return Object.entries(COOKIES)
     .map(([k, v]) => `${k}=${v}`)
     .join("; ");
 }
 
-export default async function handler(req, res) {
-  // Allow only POST (and OPTIONS preflight)
-  if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    return res.status(204).end();
-  }
+// --- Values from the captured request ---
+const ADVERTISER_ID = "af839ff10c614e3cb1fbfdb86f2db494-1790152174305";
+const DEVICE_ID = "af839ff10c614e3cb1fbfdb86f2db494-1790152174304";
+const SESSION_ID = "bd7c92c81305492faa332ed59dc5fc73-1790188831267";
+const APP_VERSION = "3.8.14";
+const SENTRY_TRACE = "5091c92ca5be49fa93b89a09b924b482-8a066d0b42e09f32-0";
+const BAGGAGE =
+  "sentry-environment=prod,sentry-release=3.8.14,sentry-public_key=b80aa90bfd086849eacd76761e1be154,sentry-trace_id=5091c92ca5be49fa93b89a09b924b482,sentry-org_id=4507419074494464,sentry-sampled=false,sentry-sample_rand=0.42995831043390664,sentry-sample_rate=0.1";
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed. Use POST." });
-  }
+const USER_AGENT =
+  "Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36";
+
+const TD_CLIENT_HINTS = JSON.stringify({
+  os_name: "Android",
+  os_version: "14",
+  device_make: "Samsung",
+  device_model: "SM-A556B",
+  display_res: "360",
+  viewport_res: "360",
+  conn_type: "4g",
+  supp_codec: "H264,H265,AV1,AAC",
+  client_throughput: "16000",
+  td_user_agent: USER_AGENT,
+  hdr_decoder: "UNKNOWN",
+  audio_decoder: "STEREO",
+  app_version: "3.8.14",
+});
+
+function buildHeaders(bodyLength) {
+  // Note: pseudo-headers (:authority, :method, :path, :scheme) are set
+  // automatically by fetch from the URL and must NOT be provided manually.
+  return {
+    accept: "application/json, text/plain, */*",
+    "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+    advertiserid: ADVERTISER_ID,
+    app_version: APP_VERSION,
+    baggage: BAGGAGE,
+    "cache-control": "no-cache",
+    "content-length": String(bodyLength),
+    "content-type": "application/json",
+    device_id: DEVICE_ID,
+    origin: "https://www.sonyliv.com",
+    pragma: "no-cache",
+    priority: "u=1, i",
+    referer: "https://www.sonyliv.com/",
+    "sec-ch-ua":
+      '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": '"Android"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "sentry-trace": SENTRY_TRACE,
+    session_id: SESSION_ID,
+    td_client_hints: TD_CLIENT_HINTS,
+    "user-agent": USER_AGENT,
+    "x-via-device": "true",
+    cookie: buildCookieHeader(),
+  };
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(204).end();
 
   try {
+    const bodyObj = req.body && Object.keys(req.body).length ? req.body : {};
+    const bodyStr = JSON.stringify(bodyObj);
+    const bodyBuf = Buffer.from(bodyStr, "utf8");
+
     const upstream = await fetch(API_URL, {
       method: "POST",
-      headers: {
-        accept: "application/json, text/plain, */*",
-        "accept-language": "en-IN,en;q=0.9",
-        "content-type": "application/json",
-        origin: "https://www.sonyliv.com",
-        referer: "https://www.sonyliv.com/",
-        "user-agent":
-          "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-        cookie: buildCookieHeader(),
-      },
-      // SonyLIV expects a JSON body; many of these endpoints accept an empty object.
-      body: JSON.stringify(req.body ?? {}),
+      headers: buildHeaders(bodyBuf.length),
+      body: bodyBuf,
     });
 
     const text = await upstream.text();
@@ -81,7 +130,6 @@ export default async function handler(req, res) {
       payload = { raw: text };
     }
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store");
     return res.status(upstream.status).json({
       ok: upstream.ok,

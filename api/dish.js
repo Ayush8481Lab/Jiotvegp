@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   try {
     const targetUrl =
-      'https://dishtv-api.revlet.net/service/api/v1/page/content?path=partner%2Fsonyliv&count=260';
+      'https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090476406';
 
     const upstream = await fetch(targetUrl, {
       method: 'GET',
@@ -18,11 +18,10 @@ export default async function handler(req, res) {
         'accept': 'application/json, text/plain, */*',
         'user-agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'box-id': '8c9a8c81-b24f-a685-14c1-e9df23264144',
-        'session-id': 'db392d41-4283-4e28-a024-07db367337d7',
+        "cookie": "sl_device_token=3a4f92a0919d4568931f657896b51b5a-1790188990243; sl_ppid=3a4f92a0919d4568931f657896b51b5a; ak_cf=g8f0-ju0v-w04o-3rxa",
         'tenant-code': 'dishtv',
-        'referer': 'https://www.dishtv.in/',
-        'origin': 'https://www.dishtv.in',
+        'referer': 'https://sonyliv.com/',
+        'origin': 'https://sonyliv.com,
       },
     });
 

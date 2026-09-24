@@ -1,6 +1,4 @@
-// api/hello.js — Vercel Serverless Function
-// Uses exactly the captured headers. No cookies.
-// Body is valid JSON padded with trailing spaces to exactly 261 bytes.
+
 
 export const config = {
   runtime: "nodejs",

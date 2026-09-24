@@ -6,7 +6,7 @@ export const config = {
 };
 
 const API_URL =
-  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
+  "https://apiv2.sonyliv.com/AGL/5.0/R/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
 
 // --- Cookies from your export ---
 // In production, set env var SONYLIV_COOKIE on Vercel to override.

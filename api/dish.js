@@ -6,7 +6,7 @@ export const config = {
 };
 
 const API_URL =
-  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
+  "https://ayushlivser.onrender.com/api/https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
 
 const USER_AGENT =
   "Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36";

@@ -1,12 +1,13 @@
 // api/hello.js — Vercel Serverless Function
-// Uses exactly the headers from the captured request. No cookies.
+// Uses exactly the captured headers. No cookies.
+// Body is valid JSON padded with trailing spaces to exactly 261 bytes.
 
 export const config = {
   runtime: "nodejs",
 };
 
 const API_URL =
-  "https://ayushlivser.onrender.com/api/https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
+  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/RJ/CONTENT/VIDEOURL/VOD/1090543899";
 
 const USER_AGENT =
   "Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36";
@@ -14,9 +15,32 @@ const USER_AGENT =
 const TD_CLIENT_HINTS =
   '{"os_name":"Android","os_version":"14","device_make":"Samsung","device_model":"SM-A556B","display_res":"360","viewport_res":"360","conn_type":"4g","supp_codec":"H264,H265,AV1,AAC","client_throughput":"16000","td_user_agent":"Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36","hdr_decoder":"UNKNOWN","audio_decoder":"STEREO","app_version":"3.8.14"}';
 
-// Pseudo-headers (:authority, :method, :path, :scheme) are set automatically
-// by fetch from the URL + method. Do NOT add them here.
-function buildHeaders() {
+// ---- The JSON body ----
+// Trimmed down to fit under 261 bytes; padded with trailing spaces (valid JSON
+// whitespace) until we hit exactly 261 bytes so content-length matches.
+const BODY_TARGET_BYTES = 261;
+
+const baseBody = {
+  videoId: "1090543899",
+  deviceId: "af839ff10c614e3cb1fbfdb86f2db494-1790152174304",
+  advertiserId: "af839ff10c614e3cb1fbfdb86f2db494-1790152174305",
+  sessionId: "bd7c92c81305492faa332ed59dc5fc73-1790188831267",
+  platform: "ANDROID",
+  appVersion: "3.8.14",
+  country: "IN",
+  state: "RJ",
+};
+
+function buildBody() {
+  let s = JSON.stringify(baseBody);
+  // Trailing whitespace is legal JSON and is ignored by parsers.
+  while (Buffer.byteLength(s, "utf8") < BODY_TARGET_BYTES) s += " ";
+  // If we overshot (body bigger than target), fall back to the raw JSON.
+  if (Buffer.byteLength(s, "utf8") > BODY_TARGET_BYTES) s = s.trimEnd();
+  return s;
+}
+
+function buildHeaders(bodyLength) {
   return {
     accept: "application/json, text/plain, */*",
     "accept-encoding": "gzip, deflate, br, zstd",
@@ -26,7 +50,7 @@ function buildHeaders() {
     baggage:
       "sentry-environment=prod,sentry-release=3.8.14,sentry-public_key=b80aa90bfd086849eacd76761e1be154,sentry-trace_id=5091c92ca5be49fa93b89a09b924b482,sentry-org_id=4507419074494464,sentry-sampled=false,sentry-sample_rand=0.42995831043390664,sentry-sample_rate=0.1",
     "cache-control": "no-cache",
-    "content-length": "261",
+    "content-length": String(bodyLength),
     "content-type": "application/json",
     device_id: "af839ff10c614e3cb1fbfdb86f2db494-1790152174304",
     origin: "https://www.sonyliv.com",
@@ -56,13 +80,13 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
 
   try {
-    // 261 bytes exactly — matches the captured content-length.
-    const bodyStr = " ".repeat(261);
+    const bodyStr = buildBody();
+    const bodyBuf = Buffer.from(bodyStr, "utf8");
 
     const upstream = await fetch(API_URL, {
       method: "POST",
-      headers: buildHeaders(),
-      body: bodyStr,
+      headers: buildHeaders(bodyBuf.length),
+      body: bodyBuf,
     });
 
     const text = await upstream.text();

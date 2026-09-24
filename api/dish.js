@@ -1,37 +1,31 @@
-// hello.js — run:  node hello.js
-// Node.js 18+ required (built-in fetch)
+// api/hello.js — Vercel Serverless Function
+import { randomBytes } from "node:crypto";
 
 const URL =
   "https://ayushlivser.onrender.com/api/https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090543528";
 
-// ---- Random ID generators ----
-
-/**
- * 32 lowercase hex chars (16 random bytes), like:
- *   af839ff10c614e3cb1fbfdb86f2db494
- */
+/** 32 lowercase hex chars (16 random bytes) */
 function randomHex32() {
-  return require("crypto").randomBytes(16).toString("hex");
+  return randomBytes(16).toString("hex");
 }
 
-/**
- * deviceId = <hex32>-<13-digit ms timestamp>
- * e.g. af839ff10c614e3cb1fbfdb86f2db494-1790152174304
- */
+/** deviceId = <hex32>-<13-digit ms timestamp> */
 function randomDeviceId() {
-  const ts = Date.now(); // 13-digit ms epoch
-  return `${randomHex32()}-${ts}`;
+  return `${randomHex32()}-${Date.now()}`;
 }
 
-/**
- * ppid = 32 hex chars
- * e.g. 3a4f92a0919d4568931f657896b51b5a
- */
+/** ppid = 32 hex chars */
 function randomPpid() {
   return randomHex32();
 }
 
-async function main() {
+export default async function handler(req, res) {
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).end();
+
   const deviceId = randomDeviceId();
   const ppid = randomPpid();
 
@@ -70,13 +64,13 @@ async function main() {
   };
 
   try {
-    const res = await fetch(URL, {
+    const upstream = await fetch(URL, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
     });
 
-    const text = await res.text();
+    const text = await upstream.text();
     let data;
     try {
       data = JSON.parse(text);
@@ -84,35 +78,22 @@ async function main() {
       data = text;
     }
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: res.ok,
-          status: res.status,
-          deviceId,
-          ppid,
-          data,
-        },
-        null,
-        2
-      )
-    );
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(upstream.status).json({
+      ok: upstream.ok,
+      status: upstream.status,
+      deviceId,
+      ppid,
+      data,
+    });
   } catch (err) {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          status: 502,
-          deviceId,
-          ppid,
-          error: err.message,
-        },
-        null,
-        2
-      )
-    );
-    process.exitCode = 1;
+    console.error("Upstream request failed:", err);
+    return res.status(502).json({
+      ok: false,
+      status: 502,
+      deviceId,
+      ppid,
+      error: err.message,
+    });
   }
-}
-
-main();
+    }

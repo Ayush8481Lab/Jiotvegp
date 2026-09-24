@@ -2,7 +2,7 @@
 // Node.js 18+ required (built-in fetch)
 
 const URL =
-  "https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090543528";
+  "https://ayushlivser.onrender.com/api/https://apiv2.sonyliv.com/AGL/5.0/A/ENG/MWEB/IN/UP/CONTENT/VIDEOURL/VOD/1090543528";
 
 // ---- Random ID generators ----
 

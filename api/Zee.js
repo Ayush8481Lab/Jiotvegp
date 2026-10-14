@@ -7,7 +7,7 @@ import { randomUUID, randomBytes } from 'crypto';
 // CONFIG
 // ------------------------------------------------------------------
 const AUTH_URL     = 'https://vzy-sso.dish.watcho.com/v1/content-auth-token';
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL_MS = 3 * 60 * 1000; // 30 minutes
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36';
 
 // CRITICAL: must be at top level. Keeps the raw binary Widevine

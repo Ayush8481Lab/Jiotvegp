@@ -10,14 +10,13 @@
 //                       → nagra license service (forward challenge with nv-authorizations: <JWT>)
 //                       → back to client
 
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 
 // ------------------------------------------------------------------
 // CONFIG
 // ------------------------------------------------------------------
-const ACCOUNT_ID = 'web_c61a88cfc7afe2ad888682d1bcc2d5b8';
-const AUTH_URL   = 'https://vzy-sso.dish.watcho.com/v1/content-auth-token';
-const CACHE_TTL_MS = 300 * 1000; // 5 minutes
+const AUTH_URL     = 'https://vzy-sso.dish.watcho.com/v1/content-auth-token';
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36';
 
@@ -26,31 +25,26 @@ export const config = {
   api: { bodyParser: false },
 };
 
-// In-memory token cache (survives only on warm lambda instances — that's fine)
-const tokenCache = new Map(); // contentId -> { token, licenseUrl, ts }
-
-const AUTH_HEADERS = {
-  'sec-ch-ua-platform': '"Windows"',
-  'x-partner-name': 'nagra',
-  'User-Agent': UA,
-  'Accept': 'application/json, text/plain, */*',
-  'sec-ch-ua': '"Chromium";v="154", "Google Chrome";v="154", "Not A(Brand";v="99"',
-  'Content-Type': 'application/json',
-  'sec-ch-ua-mobile': '?0',
-  'Origin': 'https://www.vzy.one',
-  'Sec-Fetch-Site': 'cross-site',
-  'Sec-Fetch-Mode': 'cors',
-  'Sec-Fetch-Dest': 'empty',
-  'Referer': 'https://www.vzy.one/',
-  'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
-};
+// ------------------------------------------------------------------
+// CACHE  (keyed by contentId → { token, licenseUrl, accountId, ts })
+// ------------------------------------------------------------------
+const tokenCache = new Map();
 
 // ------------------------------------------------------------------
 // HELPERS
 // ------------------------------------------------------------------
+
+/**
+ * Generate a random account id that looks like the original:
+ *   web_<32 lowercase hex chars>
+ * A new one is created per contentId and reused for CACHE_TTL_MS.
+ */
+function randomAccountId() {
+  return 'web_' + randomBytes(16).toString('hex'); // 32 hex chars
+}
+
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
-    // If some middleware already buffered it, reuse that
     if (Buffer.isBuffer(req.body)) return resolve(req.body);
     if (req.body && typeof req.body === 'object') {
       return resolve(Buffer.from(JSON.stringify(req.body)));
@@ -67,8 +61,11 @@ async function getContentAuth(contentId) {
   const hit = tokenCache.get(contentId);
   if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit;
 
+  // Fresh random account id for this content id (cached for CACHE_TTL_MS)
+  const accountId = randomAccountId();
+
   const payload = JSON.stringify({
-    accountId: ACCOUNT_ID,
+    accountId,
     contentId,
     type: '1',
     deviceUniqueId: randomUUID(),
@@ -77,16 +74,33 @@ async function getContentAuth(contentId) {
     platform: 'web',
   });
 
+  const authHeaders = {
+    'sec-ch-ua-platform': '"Windows"',
+    'x-partner-name': 'nagra',
+    'User-Agent': UA,
+    'Accept': 'application/json, text/plain, */*',
+    'sec-ch-ua': '"Chromium";v="154", "Google Chrome";v="154", "Not A(Brand";v="99"',
+    'Content-Type': 'application/json',
+    'sec-ch-ua-mobile': '?0',
+    'Origin': 'https://www.vzy.one',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    'Referer': 'https://www.vzy.one/',
+    'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+  };
+
   let resp;
   try {
     resp = await fetch(AUTH_URL, {
       method: 'POST',
-      headers: AUTH_HEADERS,
+      headers: authHeaders,
       body: payload,
     });
   } catch (e) {
     const err = new Error(e.message);
     err.stage = 'content-auth-token';
+    err.accountId = accountId;
     throw err;
   }
 
@@ -97,6 +111,7 @@ async function getContentAuth(contentId) {
     err.stage = 'content-auth-token';
     err.code = resp.status;
     err.body = text;
+    err.accountId = accountId;
     err.payload = JSON.parse(payload);
     throw err;
   }
@@ -109,24 +124,26 @@ async function getContentAuth(contentId) {
     err.stage = 'content-auth-token';
     err.code = resp.status;
     err.body = text;
+    err.accountId = accountId;
     throw err;
   }
 
-  const token = json.token;
+  const token      = json.token;
   const licenseUrl = json.licenseUrl;
 
   if (!token || !licenseUrl) {
     const err = new Error('missing token/licenseUrl');
     err.stage = 'content-auth-token';
     err.body = json;
+    err.accountId = accountId;
     throw err;
   }
 
-  const entry = { token, licenseUrl, ts: Date.now() };
+  const entry = { token, licenseUrl, accountId, ts: Date.now() };
   tokenCache.set(contentId, entry);
 
-  // keep the map from growing forever
-  if (tokenCache.size > 200) {
+  // Basic garbage collection so the map doesn't grow forever
+  if (tokenCache.size > 500) {
     const now = Date.now();
     for (const [k, v] of tokenCache) {
       if (now - v.ts >= CACHE_TTL_MS) tokenCache.delete(k);
@@ -141,14 +158,14 @@ async function getContentAuth(contentId) {
 // ------------------------------------------------------------------
 export default async function handler(req, res) {
   // ---- INPUT -----------------------------------------------------
-  const rawId = req.query?.id;
+  const rawId     = req.query?.id;
   const contentId = Array.isArray(rawId) ? rawId[0] : (rawId || '');
 
   if (!contentId) {
     return res.status(400).json({ error: 'missing ?id=CONTENT_ID' });
   }
 
-  // ---- STEP 1: get content-auth-token ----------------------------
+  // ---- STEP 1: get content-auth-token (cached 30 min per contentId)
   let auth;
   try {
     auth = await getContentAuth(contentId);
@@ -157,6 +174,7 @@ export default async function handler(req, res) {
       stage: e.stage || 'content-auth-token',
       code: e.code,
       error: e.message,
+      accountId: e.accountId,
       body: e.body,
       payload: e.payload,
     });
@@ -168,8 +186,10 @@ export default async function handler(req, res) {
   if (!challenge || challenge.length === 0) {
     return res.status(200).json({
       contentId,
+      accountId: auth.accountId,
       licenseUrl: auth.licenseUrl,
       token: auth.token,
+      cachedFor: Math.round(CACHE_TTL_MS / 1000) + 's',
       message: 'Send a Widevine challenge as raw POST body to get a license.',
     });
   }
@@ -194,13 +214,13 @@ export default async function handler(req, res) {
         'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
         'Content-Type': 'application/octet-stream',
       },
-      body: challenge, // Buffer → sent as raw bytes
+      body: challenge,
     });
   } catch (e) {
     return res.status(502).json({ stage: 'license', error: e.message });
   }
 
-  const out = Buffer.from(await upstream.arrayBuffer());
+  const out   = Buffer.from(await upstream.arrayBuffer());
   const ctype = upstream.headers.get('content-type') || 'application/octet-stream';
 
   res.status(upstream.status || 502);
@@ -208,4 +228,4 @@ export default async function handler(req, res) {
   res.setHeader('Content-Length', out.length);
 
   return res.send(out);
-}
+                                      }

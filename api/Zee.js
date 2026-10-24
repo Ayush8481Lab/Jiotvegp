@@ -1,11 +1,10 @@
-// api/hello.js  — Vercel / Next.js Node.js serverless function
+// api/hello.js — Vercel / Next.js Node.js serverless function
 //
 // GET  /api/hello?id=HE_E_10080                → { token, licenseUrl, accountId }
 // POST /api/hello?id=HE_E_10080  (raw Widevine challenge body)
 //                                              → Widevine license (binary)
 //
-// Every request fetches a fresh single-use token from content-auth-token,
-// then immediately forwards the challenge to the Nagra license server.
+// Works from browsers (CORS enabled), TiviMate, and any HTTP client.
 
 import { randomUUID, randomBytes } from 'crypto';
 
@@ -15,11 +14,26 @@ import { randomUUID, randomBytes } from 'crypto';
 const AUTH_URL = 'https://vzy-sso.dish.watcho.com/v1/content-auth-token';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36';
 
-// Keep the raw binary Widevine challenge intact.
+// Keep the raw binary Widevine challenge intact (Next.js pages router).
 export const config = { api: { bodyParser: false } };
 
 // ------------------------------------------------------------------
-// STATIC HEADERS
+// CORS
+// ------------------------------------------------------------------
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Range, nv-authorizations, x-requested-with',
+  'Access-Control-Expose-Headers': 'Content-Type, Content-Length',
+  'Access-Control-Max-Age': '86400',
+};
+
+function setCors(res) {
+  for (const [k, v] of Object.entries(CORS_HEADERS)) res.setHeader(k, v);
+}
+
+// ------------------------------------------------------------------
+// STATIC HEADERS (to Nagra)
 // ------------------------------------------------------------------
 const AUTH_HEADERS = {
   'sec-ch-ua-platform': '"Windows"',
@@ -123,41 +137,63 @@ async function getFreshAuth(contentId) {
 // HANDLER
 // ------------------------------------------------------------------
 export default async function handler(req, res) {
+  // CORS must be set before ANY response, including OPTIONS / errors.
+  setCors(res);
+
+  // ---- Preflight --------------------------------------------------
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.status(405).json({ error: 'method not allowed' });
+    return;
+  }
+
   const rawId = req.query?.id;
   const contentId = Array.isArray(rawId) ? rawId[0] : (rawId || '');
 
-  if (!contentId) return res.status(400).json({ error: 'missing ?id=CONTENT_ID' });
+  if (!contentId) {
+    res.status(400).json({ error: 'missing ?id=CONTENT_ID' });
+    return;
+  }
 
   // ---- Fresh single-use token every call -------------------------
   let auth;
   try {
     auth = await getFreshAuth(contentId);
   } catch (e) {
-    return res.status(502).json({
+    res.status(502).json({
       stage: e.stage || 'content-auth-token',
       code: e.code,
       error: e.message,
       accountId: e.accountId,
       body: e.body,
     });
+    return;
   }
 
   // ---- Read challenge (query param, body, or raw stream) ---------
   let challenge = Buffer.alloc(0);
   if (req.query?.challenge) {
-    try { challenge = Buffer.from(String(req.query.challenge), 'base64'); } catch {}
+    try {
+      const b64 = String(req.query.challenge).replace(/-/g, '+').replace(/_/g, '/');
+      challenge = Buffer.from(b64, 'base64');
+    } catch {}
   }
   if (!challenge.length) challenge = await readRawBody(req);
 
   // ---- MODE 1: no body → auth info --------------------------------
   if (!challenge.length) {
-    return res.status(200).json({
+    res.status(200).json({
       contentId,
       accountId: auth.accountId,
       licenseUrl: auth.licenseUrl,
       token: auth.token,
       message: 'Send a Widevine challenge as raw POST body to get a license.',
     });
+    return;
   }
 
   // ---- MODE 2: forward challenge to Nagra -------------------------
@@ -169,7 +205,8 @@ export default async function handler(req, res) {
       body: challenge,
     });
   } catch (e) {
-    return res.status(502).json({ stage: 'license', error: e.message });
+    res.status(502).json({ stage: 'license', error: e.message });
+    return;
   }
 
   const out = Buffer.from(await upstream.arrayBuffer());
@@ -178,5 +215,5 @@ export default async function handler(req, res) {
   res.status(upstream.status || 502);
   res.setHeader('Content-Type', ctype);
   res.setHeader('Content-Length', out.length);
-  return res.send(out);
-}
+  res.send(out);
+      }

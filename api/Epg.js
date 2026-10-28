@@ -1,15 +1,14 @@
-// api/epg.js
-// XMLTV EPG for Vercel
-// - intvschedule.com: RSC flight payload parsing
-// - tvwish.com (The Q): curl-cffi-node for Chrome TLS/JA3 impersonation
+// api/epg.js  —  Node.js runtime (NOT Edge)
+// Uses curl-cffi-node to impersonate Chrome TLS/JA3 for tvwish (Cloudflare bypass)
 
-import { fetch as impersonateFetch } from 'curl-cffi-node';
+import { Session } from 'curl-cffi-node';
 
-export const config = { maxDuration: 60 };
+export const config = { maxDuration: 30 };
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const TVWISH_DAYS_AHEAD = 4;
 const MAX_PROGRAM_DURATION_MS = 6 * 60 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 15_000;
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -23,46 +22,20 @@ const CHANNELS = [
   { id: '9487064', name: 'Fakt Marathi',        type: 'intv',   url: 'https://intvschedule.com/channel/fakt-marathi/index.txt' },
 ];
 
-/* ================================================================== */
-/* XML helpers                                                        */
-/* ================================================================== */
+/* ---------------- helpers ---------------- */
 function xmlEscape(v) {
-  return v == null
-    ? ''
-    : String(v)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
+  return v == null ? '' : String(v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
 function fmtXmlDate(d) {
   const p = (n) => String(n).padStart(2, '0');
-  return (
-    d.getUTCFullYear() +
-    p(d.getUTCMonth() + 1) +
-    p(d.getUTCDate()) +
-    p(d.getUTCHours()) +
-    p(d.getUTCMinutes()) +
-    p(d.getUTCSeconds()) +
-    ' +0000'
-  );
+  return d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) +
+         p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + ' +0000';
 }
 
-async function fetchWithTimeout(url, opts = {}, ms = 20000) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/* ================================================================== */
-/* intvschedule.com (unchanged)                                      */
-/* ================================================================== */
+/* ---------------- intvschedule RSC parser ---------------- */
 function extractJsonAfterKey(text, key) {
   const re = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*\\{');
   const m = re.exec(text);
@@ -131,7 +104,7 @@ function istToUtc(dateStr, hhmm) {
 }
 
 async function fetchIntvChannel(channel) {
-  const res = await fetchWithTimeout(channel.url, {
+  const res = await fetch(channel.url, {
     headers: {
       'User-Agent': UA,
       Referer: 'https://intvschedule.com/',
@@ -141,7 +114,7 @@ async function fetchIntvChannel(channel) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const schedule = extractIntvSchedule(await res.text());
-  if (!schedule) throw new Error(`No schedule`);
+  if (!schedule) throw new Error('No schedule');
   const out = [];
   for (const day of schedule) {
     if (!day?.keyDate || !Array.isArray(day.programs)) continue;
@@ -171,16 +144,20 @@ async function fetchIntvChannel(channel) {
     .sort((a, b) => a.start - b.start);
 }
 
-/* ================================================================== */
-/* tvwish via curl-cffi-node (Chrome TLS/JA3 impersonation)          */
-/* ================================================================== */
+/* ---------------- tvwish via curl-cffi-node ---------------- */
+// One Chrome-impersonating session reused for all tvwish requests.
+const tvwishSession = new Session({
+  impersonate: 'chrome116',   // full Chrome TLS/JA3/HTTP2 fingerprint
+  timeout: 20,
+  followRedirects: true,
+});
+
 async function fetchTvwishDay(channelId, date, debug = false) {
   const dt = date.toISOString();
   const url = `https://www.tvwish.com/Api/ChannelScheduleApi/${channelId}/DayJson?dt=${dt}`;
 
   try {
-    const res = await impersonateFetch(url, {
-      impersonate: 'chrome',   // 复刻 Chrome 的 TLS/JA3/HTTP2 指纹
+    const response = await tvwishSession.get(url, {
       headers: {
         'User-Agent': UA,
         Accept: 'application/json, text/plain, */*',
@@ -196,36 +173,30 @@ async function fetchTvwishDay(channelId, date, debug = false) {
       },
     });
 
-    if (!res.ok) {
-      if (debug) console.error(`[tvwish] ${dt} HTTP ${res.status}`);
-      if (res.status === 404) return [];
-      throw new Error(`HTTP ${res.status}`);
+    if (response.status === 404) return [];
+    if (response.status !== 200) {
+      if (debug) console.error(`[tvwish] ${dt} HTTP ${response.status}`);
+      throw new Error(`HTTP ${response.status}`);
     }
 
-    const text = await res.text();
+    const data = response.json();
+    if (Array.isArray(data.programs)) {
+      if (debug) console.error(`[tvwish] ${dt} OK: ${data.programs.length}`);
+      return data.programs;
+    }
 
-    // 直接 JSON
-    try {
-      const data = JSON.parse(text);
-      if (Array.isArray(data.programs)) {
-        if (debug) console.error(`[tvwish] ${dt} OK: ${data.programs.length} programs`);
-        return data.programs;
-      }
-    } catch (_) {}
-
-    // 兼容被包裹的响应
+    // Fallback if the body is wrapped somehow
+    const text = response.text();
     const m = text.match(/\{[\s\S]*"programs"[\s\S]*\}/);
     if (m) {
-      try {
-        const data = JSON.parse(m[0]);
-        if (Array.isArray(data.programs)) return data.programs;
-      } catch (_) {}
+      const parsed = JSON.parse(m[0]);
+      if (Array.isArray(parsed.programs)) return parsed.programs;
     }
 
-    if (debug) console.error(`[tvwish] ${dt} invalid body:`, text.slice(0, 300));
+    if (debug) console.error(`[tvwish] ${dt} bad body:`, text.slice(0, 200));
     throw new Error('invalid body');
   } catch (err) {
-    if (debug) console.error(`[tvwish] ${dt} failed:`, err.message);
+    if (debug) console.error(`[tvwish] ${dt} failed: ${err.message}`);
     throw err;
   }
 }
@@ -243,6 +214,7 @@ async function fetchTvwishChannel(channel, debug = false) {
     } catch (e) {
       if (debug) console.error(`[tvwish] day ${i} skipped: ${e.message}`);
     }
+    // small pause between days to be polite
     if (i < TVWISH_DAYS_AHEAD) await new Promise(r => setTimeout(r, 300));
   }
 
@@ -278,19 +250,17 @@ async function fetchTvwishChannel(channel, debug = false) {
   return out;
 }
 
-/* ================================================================== */
-/* Handler                                                            */
-/* ================================================================== */
+/* ---------------- Vercel handler ---------------- */
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return res.status(405).send('Method Not Allowed');
   }
 
-  const u = new URL(req.url, 'http://x');
-  const debug = u.searchParams.get('debug');
+  const url = new URL(req.url, 'http://x');
+  const debug = url.searchParams.get('debug');
 
   if (debug === 'tvwish') {
-    const ch = CHANNELS.find(c => c.type === 'tvwish');
+    const ch = CHANNELS.find((c) => c.type === 'tvwish');
     let full = [];
     let error = null;
     try {
@@ -312,7 +282,7 @@ export default async function handler(req, res) {
       CHANNELS.map(async (channel) => {
         let programmes = [];
         try {
-          if (channel.type === 'intv') programmes = await fetchIntvChannel(channel);
+          if (channel.type === 'intv')   programmes = await fetchIntvChannel(channel);
           if (channel.type === 'tvwish') programmes = await fetchTvwishChannel(channel, !!debug);
         } catch (e) {
           console.error(`[${channel.name}] ${e.message}`);
@@ -320,7 +290,7 @@ export default async function handler(req, res) {
         return { channel, programmes };
       })
     );
-    const data = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    const data = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE tv SYSTEM "xmltv.dtd">\n';
     xml += '<tv generator-info-name="INTV Schedule EPG" generator-info-url="https://intvschedule.com/">\n';
@@ -350,4 +320,4 @@ export default async function handler(req, res) {
     console.error('EPG fatal:', err);
     return res.status(500).send(`Internal Server Error: ${err.message}`);
   }
-}
+                                     }

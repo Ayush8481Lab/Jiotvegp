@@ -1,25 +1,20 @@
 // api/epg.js
-// Vercel serverless function that outputs XMLTV EPG for TiviMate.
-// - intvschedule.com  -> RSC flight payload parsed directly
-// - tvwish.com        -> routed through hello-amh.pages.dev proxy (CF bypass)
+// XMLTV EPG for Vercel
+// - intvschedule.com: RSC flight payload parsing
+// - tvwish.com (The Q): curl-cffi-node for Chrome TLS/JA3 impersonation
 
-export const config = {
-  maxDuration: 60,
-};
+import { fetch as impersonateFetch } from 'curl-cffi-node';
+
+export const config = { maxDuration: 60 };
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const TVWISH_DAYS_AHEAD = 4;
 const MAX_PROGRAM_DURATION_MS = 6 * 60 * 60 * 1000;
 
-const TVWISH_PROXY_BASE = 'https://tv.wapgotube.workers.dev/proxy/';
-
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-/* ------------------------------------------------------------------ */
-/* Channel registry                                                   */
-/* ------------------------------------------------------------------ */
 const CHANNELS = [
   { id: 'DDF001',  name: 'Goldmines',           type: 'intv',   url: 'https://intvschedule.com/channel/goldmines/index.txt' },
   { id: 'DDF002',  name: 'Goldmines Movies',    type: 'intv',   url: 'https://intvschedule.com/channel/goldmines-movies/index.txt' },
@@ -28,9 +23,9 @@ const CHANNELS = [
   { id: '9487064', name: 'Fakt Marathi',        type: 'intv',   url: 'https://intvschedule.com/channel/fakt-marathi/index.txt' },
 ];
 
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
 /* XML helpers                                                        */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
 function xmlEscape(v) {
   return v == null
     ? ''
@@ -55,9 +50,6 @@ function fmtXmlDate(d) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Fetch helper                                                       */
-/* ------------------------------------------------------------------ */
 async function fetchWithTimeout(url, opts = {}, ms = 20000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
@@ -68,15 +60,14 @@ async function fetchWithTimeout(url, opts = {}, ms = 20000) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* intvschedule.com (unchanged, working)                              */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/* intvschedule.com (unchanged)                                      */
+/* ================================================================== */
 function extractJsonAfterKey(text, key) {
   const re = new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*\\{');
   const m = re.exec(text);
   if (!m) return null;
   const start = m.index + m[0].length - 1;
-
   let depth = 0, inStr = false, esc = false;
   for (let i = start; i < text.length; i++) {
     const c = text[i];
@@ -90,11 +81,7 @@ function extractJsonAfterKey(text, key) {
       else if (c === '}') {
         depth--;
         if (depth === 0) {
-          try {
-            return JSON.parse(text.slice(start, i + 1));
-          } catch {
-            return null;
-          }
+          try { return JSON.parse(text.slice(start, i + 1)); } catch { return null; }
         }
       }
     }
@@ -107,7 +94,6 @@ function extractScheduleArray(text) {
   if (idx === -1) return null;
   const bracket = text.indexOf('[', idx);
   if (bracket === -1) return null;
-
   let depth = 0, inStr = false, esc = false;
   for (let i = bracket; i < text.length; i++) {
     const c = text[i];
@@ -124,9 +110,7 @@ function extractScheduleArray(text) {
           try {
             const arr = JSON.parse(text.slice(bracket, i + 1));
             if (Array.isArray(arr) && arr[0]?.keyDate) return arr;
-          } catch {
-            return null;
-          }
+          } catch { return null; }
         }
       }
     }
@@ -155,11 +139,9 @@ async function fetchIntvChannel(channel) {
       'Accept-Language': 'en-US,en;q=0.9',
     },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${channel.url}`);
-
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const schedule = extractIntvSchedule(await res.text());
-  if (!schedule) throw new Error(`No schedule for ${channel.name}`);
-
+  if (!schedule) throw new Error(`No schedule`);
   const out = [];
   for (const day of schedule) {
     if (!day?.keyDate || !Array.isArray(day.programs)) continue;
@@ -171,8 +153,7 @@ async function fetchIntvChannel(channel) {
         end = new Date(start.getTime() + MAX_PROGRAM_DURATION_MS);
       out.push({
         title: p.n || p.spn || 'Unknown',
-        start,
-        end,
+        start, end,
         desc: p.desc || p.sp || '',
         category: p.d || '',
         language: p.lang || '',
@@ -190,79 +171,79 @@ async function fetchIntvChannel(channel) {
     .sort((a, b) => a.start - b.start);
 }
 
-/* ------------------------------------------------------------------ */
-/* tvwish via proxy                                                   */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/* tvwish via curl-cffi-node (Chrome TLS/JA3 impersonation)          */
+/* ================================================================== */
 async function fetchTvwishDay(channelId, date, debug = false) {
   const dt = date.toISOString();
-  const target = `https://www.tvwish.com/Api/ChannelScheduleApi/${channelId}/DayJson?dt=${dt}`;
-  const proxyUrl = TVWISH_PROXY_BASE + encodeURIComponent(target);
+  const url = `https://www.tvwish.com/Api/ChannelScheduleApi/${channelId}/DayJson?dt=${dt}`;
 
-  const res = await fetchWithTimeout(
-    proxyUrl,
-    {
+  try {
+    const res = await impersonateFetch(url, {
+      impersonate: 'chrome',   // 复刻 Chrome 的 TLS/JA3/HTTP2 指纹
       headers: {
         'User-Agent': UA,
         Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
+        Referer: `https://www.tvwish.com/Channel/${channelId}`,
+        Origin: 'https://www.tvwish.com',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
       },
-    },
-    25000
-  );
+    });
 
-  if (!res.ok) {
-    if (debug)
-      console.error(`[tvwish ${channelId}] proxy HTTP ${res.status} for ${dt}`);
-    if (res.status === 404) return [];
-    throw new Error(`Proxy HTTP ${res.status} for ${dt}`);
-  }
+    if (!res.ok) {
+      if (debug) console.error(`[tvwish] ${dt} HTTP ${res.status}`);
+      if (res.status === 404) return [];
+      throw new Error(`HTTP ${res.status}`);
+    }
 
-  const text = await res.text();
+    const text = await res.text();
 
-  // 1) Direct JSON
-  try {
-    const data = JSON.parse(text);
-    return Array.isArray(data.programs) ? data.programs : [];
-  } catch (_) {}
-
-  // 2) Extract JSON object from wrapped/markdown response
-  const m = text.match(/\{[\s\S]*"programs"[\s\S]*\}/);
-  if (m) {
+    // 直接 JSON
     try {
-      const data = JSON.parse(m[0]);
-      if (Array.isArray(data.programs)) return data.programs;
+      const data = JSON.parse(text);
+      if (Array.isArray(data.programs)) {
+        if (debug) console.error(`[tvwish] ${dt} OK: ${data.programs.length} programs`);
+        return data.programs;
+      }
     } catch (_) {}
-  }
 
-  if (debug) {
-    console.error(
-      `[tvwish ${channelId}] unexpected body for ${dt}:`,
-      text.slice(0, 300)
-    );
+    // 兼容被包裹的响应
+    const m = text.match(/\{[\s\S]*"programs"[\s\S]*\}/);
+    if (m) {
+      try {
+        const data = JSON.parse(m[0]);
+        if (Array.isArray(data.programs)) return data.programs;
+      } catch (_) {}
+    }
+
+    if (debug) console.error(`[tvwish] ${dt} invalid body:`, text.slice(0, 300));
+    throw new Error('invalid body');
+  } catch (err) {
+    if (debug) console.error(`[tvwish] ${dt} failed:`, err.message);
+    throw err;
   }
-  throw new Error(`Invalid JSON body from proxy for ${dt}`);
 }
 
 async function fetchTvwishChannel(channel, debug = false) {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
-  const days = [];
-  for (let i = 0; i <= TVWISH_DAYS_AHEAD; i++) {
-    days.push(new Date(today.getTime() + i * 86400000));
-  }
-
-  const results = await Promise.allSettled(
-    days.map((d) => fetchTvwishDay(channel.channelId, d, debug))
-  );
-
   const raw = [];
-  for (const r of results) {
-    if (r.status === 'fulfilled' && Array.isArray(r.value) && r.value.length) {
-      raw.push(...r.value);
-    } else if (r.status === 'rejected' && debug) {
-      console.error(`[tvwish ${channel.channelId}] day failed:`, r.reason?.message);
+  for (let i = 0; i <= TVWISH_DAYS_AHEAD; i++) {
+    const date = new Date(today.getTime() + i * 86400000);
+    try {
+      const progs = await fetchTvwishDay(channel.channelId, date, debug);
+      if (progs.length) raw.push(...progs);
+    } catch (e) {
+      if (debug) console.error(`[tvwish] day ${i} skipped: ${e.message}`);
     }
+    if (i < TVWISH_DAYS_AHEAD) await new Promise(r => setTimeout(r, 300));
   }
 
   raw.sort((a, b) => new Date(a.sdtu) - new Date(b.sdtu));
@@ -286,11 +267,9 @@ async function fetchTvwishChannel(channel, debug = false) {
     if (end <= start) end = new Date(start.getTime() + 30 * 60 * 1000);
     if (end - start > MAX_PROGRAM_DURATION_MS)
       end = new Date(start.getTime() + MAX_PROGRAM_DURATION_MS);
-
     out.push({
       title: p.pn || p.spn || 'Unknown',
-      start,
-      end,
+      start, end,
       desc: p.sp || p.ed || '',
       category: p.genres?.[0]?.name || '',
       language: '',
@@ -299,9 +278,9 @@ async function fetchTvwishChannel(channel, debug = false) {
   return out;
 }
 
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
 /* Handler                                                            */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return res.status(405).send('Method Not Allowed');
@@ -310,68 +289,24 @@ export default async function handler(req, res) {
   const u = new URL(req.url, 'http://x');
   const debug = u.searchParams.get('debug');
 
-  /* ---- Debug: check tvwish proxy health ------------------------- */
   if (debug === 'tvwish') {
-    const ch = CHANNELS.find((c) => c.type === 'tvwish');
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const dt = today.toISOString();
-    const target = `https://www.tvwish.com/Api/ChannelScheduleApi/${ch.channelId}/DayJson?dt=${dt}`;
-    const proxyUrl = TVWISH_PROXY_BASE + encodeURIComponent(target);
-
-    let proxyStatus = 0;
-    let preview = '';
-    let bodyLen = 0;
-    let parsedCount = 0;
+    const ch = CHANNELS.find(c => c.type === 'tvwish');
+    let full = [];
     let error = null;
-
     try {
-      const r = await fetchWithTimeout(
-        proxyUrl,
-        {
-          headers: {
-            'User-Agent': UA,
-            Accept: 'application/json, text/plain, */*',
-          },
-        },
-        25000
-      );
-      proxyStatus = r.status;
-      const body = await r.text();
-      bodyLen = body.length;
-      preview = body.slice(0, 500);
-      try {
-        const j = JSON.parse(body);
-        if (Array.isArray(j.programs)) parsedCount = j.programs.length;
-      } catch (_) {}
+      full = await fetchTvwishChannel(ch, true);
     } catch (e) {
       error = e.message;
     }
-
-    let fullPrograms = 0;
-    let fullError = null;
-    try {
-      const full = await fetchTvwishChannel(ch, true);
-      fullPrograms = full.length;
-    } catch (e) {
-      fullError = e.message;
-    }
-
     return res.status(200).json({
       channel: ch.name,
       channelId: ch.channelId,
-      proxyUrl,
-      proxyStatus,
-      bodyLen,
-      preview,
-      parsedCount,
-      fullPrograms,
+      totalPrograms: full.length,
+      firstThree: full.slice(0, 3),
       error,
-      fullError,
     });
   }
 
-  /* ---- Normal XMLTV output -------------------------------------- */
   try {
     const results = await Promise.allSettled(
       CHANNELS.map(async (channel) => {
@@ -385,9 +320,7 @@ export default async function handler(req, res) {
         return { channel, programmes };
       })
     );
-    const data = results
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value);
+    const data = results.filter(r => r.status === 'fulfilled').map(r => r.value);
 
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE tv SYSTEM "xmltv.dtd">\n';
     xml += '<tv generator-info-name="INTV Schedule EPG" generator-info-url="https://intvschedule.com/">\n';
@@ -400,9 +333,7 @@ export default async function handler(req, res) {
 
     for (const { channel, programmes } of data) {
       for (const p of programmes) {
-        xml +=
-          `  <programme start="${fmtXmlDate(p.start)}" stop="${fmtXmlDate(p.end)}" ` +
-          `channel="${xmlEscape(channel.id)}">\n`;
+        xml += `  <programme start="${fmtXmlDate(p.start)}" stop="${fmtXmlDate(p.end)}" channel="${xmlEscape(channel.id)}">\n`;
         xml += `    <title lang="en">${xmlEscape(p.title)}</title>\n`;
         if (p.desc)     xml += `    <desc lang="en">${xmlEscape(p.desc)}</desc>\n`;
         if (p.category) xml += `    <category lang="en">${xmlEscape(p.category)}</category>\n`;
@@ -410,7 +341,6 @@ export default async function handler(req, res) {
         xml += `  </programme>\n`;
       }
     }
-
     xml += '</tv>\n';
 
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
@@ -420,4 +350,4 @@ export default async function handler(req, res) {
     console.error('EPG fatal:', err);
     return res.status(500).send(`Internal Server Error: ${err.message}`);
   }
-    }
+}

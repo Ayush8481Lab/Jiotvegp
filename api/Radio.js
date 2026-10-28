@@ -22,15 +22,10 @@ const CACHE_TTL_SECONDS = 24 * 60 * 60;   // 24 hours (CDN)
 const SITE_BASE = 'https://akashvani.gov.in';
 const EPG_BASE = 'https://cuesheets.prasarbharati.org';
 
-/* Source page. Override with env var RADIO_SOURCE_URL if the path ever changes. */
+/* Source page — the only URL needed for the live player. */
 const SOURCE_URLS = process.env.RADIO_SOURCE_URL
   ? [process.env.RADIO_SOURCE_URL]
-  : [
-      'https://akashvani.gov.in/',
-      'https://akashvani.gov.in/live-radio/',
-      'https://akashvani.gov.in/air-live-radio/',
-      'https://akashvani.gov.in/live/',
-    ];
+  : ['https://akashvani.gov.in/radio/live.php'];
 
 /* Module-level cache (persists while the lambda stays warm) */
 let memoryCache = { data: null, expiresAt: 0 };
@@ -148,7 +143,7 @@ async function fetchSourceHtml() {
 }
 
 /* ---------------------------------------------------------------------------
- *  Payload builder
+ *  Payload builder  (unchanged – works with the HTML you supplied)
  * ------------------------------------------------------------------------- */
 function buildPayload(rawHtml) {
   const html = decodeEntities(rawHtml);
@@ -223,7 +218,7 @@ function buildPayload(rawHtml) {
 }
 
 /* ---------------------------------------------------------------------------
- *  Single channel
+ *  Single channel  (unchanged)
  * ------------------------------------------------------------------------- */
 function buildChannel(cardHtml, channelId, streams, usedIds, regionName) {
   const name =
@@ -265,7 +260,7 @@ function buildChannel(cardHtml, channelId, streams, usedIds, regionName) {
 }
 
 /* ---------------------------------------------------------------------------
- *  Stream URL map  (parsed from the inline `var channels = { … }` block)
+ *  Stream URL map  (unchanged)
  * ------------------------------------------------------------------------- */
 function parseStreamMap(html) {
   const map = Object.create(null);
@@ -300,7 +295,7 @@ function parseStreamMap(html) {
 }
 
 /* ---------------------------------------------------------------------------
- *  Small extractors
+ *  Small extractors  (unchanged)
  * ------------------------------------------------------------------------- */
 function extractName(cardHtml) {
   const m = cardHtml.match(/<div[^>]*class="channel-name"[^>]*>([\s\S]*?)<\/div>/i);
@@ -336,7 +331,7 @@ function firstNumber(value, re) {
 }
 
 /* ---------------------------------------------------------------------------
- *  Utilities
+ *  Utilities  (unchanged)
  * ------------------------------------------------------------------------- */
 function cleanText(str) {
   return String(str || '')
@@ -368,4 +363,4 @@ function decodeEntities(str) {
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&');
-}
+    }

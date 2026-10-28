@@ -11,7 +11,7 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const TVWISH_DAYS_AHEAD = 4;
 const MAX_PROGRAM_DURATION_MS = 6 * 60 * 60 * 1000;
 
-const TVWISH_PROXY_BASE = 'https://hello-amh.pages.dev/Segmentsproxy?url=';
+const TVWISH_PROXY_BASE = 'https://tv.wapgotube.workers.dev/proxy/';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +

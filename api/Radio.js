@@ -207,7 +207,7 @@ function buildPayload(rawHtml) {
 
   return {
     success: true,
-    source: 'akashvani.gov.in',
+    source: 'Ayush8481virtualLabs,
     generatedAt: new Date().toISOString(),
     cacheTtlSeconds: CACHE_TTL_SECONDS,
     totalRegions: regions.length,
@@ -248,15 +248,9 @@ function buildChannel(cardHtml, channelId, streams, usedIds, regionName) {
   return {
     id,
     name,
-    region: regionName,
-    language: extractLanguage(cardHtml),
     logo: logo ? absolutise(logo.trim()) : null,
     streamUrl: stream ? stream.streamUrl : null,
-    streamType: 'hls',
-    epg: epgNum ? `${EPG_BASE}/viewsheet/${epgNum}` : null,
-    highlights: hlNum ? `${EPG_BASE}/highlights/${hlNum}` : null,
-    sourceChannelId: channelId,
-  };
+ };
 }
 
 /* ---------------------------------------------------------------------------

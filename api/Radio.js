@@ -207,7 +207,7 @@ function buildPayload(rawHtml) {
 
   return {
     success: true,
-    source: 'akashvani.gov.in',
+    source: 'AyushLab',
     generatedAt: new Date().toISOString(),
     cacheTtlSeconds: CACHE_TTL_SECONDS,
     totalRegions: regions.length,

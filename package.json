@@ -3,11 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "build": "next build",
-    "start": "next start"
-  },
   "dependencies": {
-    "curl-cffi-node": "^0.1.8"
+    "curl-cffi-node": "latest"
   }
 }

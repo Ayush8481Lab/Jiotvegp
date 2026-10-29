@@ -1,8 +1,3 @@
-// api/epg.js
-// Vercel serverless function that outputs XMLTV EPG for TiviMate.
-// Sources:
-//   - intvschedule.com   (RSC flight payload -> initialScheduleData.schedule)
-//   - freelivetv.org     (server-rendered HTML embed for The Q)
 
 export const config = {
   maxDuration: 60, // seconds (Node runtime)
